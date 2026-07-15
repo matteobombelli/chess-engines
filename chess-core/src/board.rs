@@ -81,6 +81,9 @@ pub struct Board {
     pub en_passant: Option<Square>,
     pub halfmove_clock: u32,
     pub fullmove_number: u32,
+
+    /// The moves played on this board so far, in Standard Algebraic Notation
+    pub san_history: Vec<String>,
 }
 
 impl Board {
@@ -98,6 +101,7 @@ impl Board {
             en_passant: None,
             halfmove_clock: 0,
             fullmove_number: 1,
+            san_history: Vec::new(),
         }
     }
 

@@ -20,8 +20,23 @@ pub enum Status {
 }
 
 impl Board {
-    /// Apply a move to the Board
+    /// Apply a move to the Board, recording it in `san_history` as SAN
     pub fn make_move(&mut self, mv: Move) {
+        // Compute the move text against the pre-move position (for capture,
+        // disambiguation), apply the move, then add the check/mate suffix from
+        // the resulting position where `side_to_move` is now the opponent
+        let body: String = self.san_body(mv);
+        self.apply_move(mv);
+        let suffix: &str = match self.status() {
+            Status::Checkmate => "#",
+            _ if self.is_in_check() => "+",
+            _ => "",
+        };
+        self.san_history.push(format!("{body}{suffix}"));
+    }
+
+    /// Apply a move to the Board without recording it
+    fn apply_move(&mut self, mv: Move) {
         let color: Color = mv.piece.color;
         let from: Square = mv.start_square;
         let to: Square = mv.end_square;
@@ -119,7 +134,7 @@ impl Board {
         // A pseudo-legal move is legal only if it doesn't leave our king in check
         for mv in self.pseudo_legal_moves() {
             let mut next: Board = self.clone();
-            next.make_move(mv);
+            next.apply_move(mv);
             if let Some(king) = next.find_king(me) {
                 if !next.is_attacked(king, me.opposite()) {
                     legal_moves.push(mv);
@@ -427,7 +442,7 @@ mod tests {
         let mut nodes: u64 = 0;
         for mv in board.get_legal_moves() {
             let mut next: Board = board.clone();
-            next.make_move(mv);
+            next.apply_move(mv);
             nodes += perft(&next, depth - 1);
         }
         nodes

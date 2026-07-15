@@ -191,8 +191,14 @@ fn char_from_piece(p: Piece) -> char {
     }
 }
 
-fn str_from_square(sq: Square) -> String {
-    let file: char = match sq.file() {
+pub(crate) fn str_from_square(sq: Square) -> String {
+    let rank: u8 = sq.rank() + 1;
+    format!("{}{}", file_letter(sq.file()), rank.to_string())
+}
+
+/// Turn a 0..=7 file index into its letter a..h
+pub(crate) fn file_letter(file: u8) -> char {
+    match file {
         0 => 'a',
         1 => 'b',
         2 => 'c',
@@ -202,11 +208,7 @@ fn str_from_square(sq: Square) -> String {
         6 => 'g',
         7 => 'h',
         _ => '-',
-    };
-
-    let rank: u8 = sq.rank() + 1;
-
-    format!("{}{}", file, rank.to_string())
+    }
 }
 
 #[cfg(test)]
