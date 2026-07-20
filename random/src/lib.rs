@@ -3,14 +3,14 @@ use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
 /// One newline-delimited JSON request to the bot.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BotRequest {
     pub fen: String,
     /// Optional opponent move to apply before the bot replies.
     pub san: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct BotResponse {
     pub san: String,
     pub fen: String,

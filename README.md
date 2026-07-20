@@ -1,10 +1,11 @@
 # ChessBots
 
-Run the random bot as a newline-delimited JSON backend:
+Run the random bot API and frontend in separate terminals:
 
 ```sh
-echo '{"fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","san":"e4"}' | cargo run -q -p random
+cargo run -p random
+cd frontend && trunk serve --open
 ```
 
-It returns the bot's legal SAN move and the resulting FEN. Omit `san` to ask
-the bot to move directly from the supplied position.
+`POST http://127.0.0.1:3000/move` accepts `{"fen":"...","san":"e4"}` and
+returns the bot's legal SAN move and resulting FEN.
