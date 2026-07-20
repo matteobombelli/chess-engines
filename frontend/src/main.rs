@@ -6,7 +6,7 @@ use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const BOT_URL: &str = "http://127.0.0.1:3000/move";
+const BOT_URL: &str = "/projects/chessengines/api/move";
 
 #[derive(Serialize)]
 struct BotRequest {
@@ -252,18 +252,18 @@ fn square_class(board: Board, selected: Option<Square>, square: Square) -> Strin
 
 fn piece_src(piece: Piece) -> &'static str {
     match (piece.color, piece.kind) {
-        (Color::White, PieceKind::Pawn) => "/public/white-pawn.png",
-        (Color::White, PieceKind::Knight) => "/public/white-knight.png",
-        (Color::White, PieceKind::Bishop) => "/public/white-bishop.png",
-        (Color::White, PieceKind::Rook) => "/public/white-rook.png",
-        (Color::White, PieceKind::Queen) => "/public/white-queen.png",
-        (Color::White, PieceKind::King) => "/public/white-king.png",
-        (Color::Black, PieceKind::Pawn) => "/public/black-pawn.png",
-        (Color::Black, PieceKind::Knight) => "/public/black-knight.png",
-        (Color::Black, PieceKind::Bishop) => "/public/black-bishop.png",
-        (Color::Black, PieceKind::Rook) => "/public/black-rook.png",
-        (Color::Black, PieceKind::Queen) => "/public/black-queen.png",
-        (Color::Black, PieceKind::King) => "/public/black-king.png",
+        (Color::White, PieceKind::Pawn) => "/projects/chessengines/public/white-pawn.png",
+        (Color::White, PieceKind::Knight) => "/projects/chessengines/public/white-knight.png",
+        (Color::White, PieceKind::Bishop) => "/projects/chessengines/public/white-bishop.png",
+        (Color::White, PieceKind::Rook) => "/projects/chessengines/public/white-rook.png",
+        (Color::White, PieceKind::Queen) => "/projects/chessengines/public/white-queen.png",
+        (Color::White, PieceKind::King) => "/projects/chessengines/public/white-king.png",
+        (Color::Black, PieceKind::Pawn) => "/projects/chessengines/public/black-pawn.png",
+        (Color::Black, PieceKind::Knight) => "/projects/chessengines/public/black-knight.png",
+        (Color::Black, PieceKind::Bishop) => "/projects/chessengines/public/black-bishop.png",
+        (Color::Black, PieceKind::Rook) => "/projects/chessengines/public/black-rook.png",
+        (Color::Black, PieceKind::Queen) => "/projects/chessengines/public/black-queen.png",
+        (Color::Black, PieceKind::King) => "/projects/chessengines/public/black-king.png",
     }
 }
 

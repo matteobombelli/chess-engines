@@ -49,9 +49,11 @@ async fn main() {
     let app = Router::new()
         .route("/move", post(move_handler))
         .route("/move", options(preflight));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:3000")
+    let bind_address = std::env::var("BIND_ADDRESS")
+        .unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
-        .expect("bind random bot on port 3000");
-    println!("Random bot listening on http://127.0.0.1:3000");
+        .unwrap_or_else(|error| panic!("bind random bot on {bind_address}: {error}"));
+    println!("Random bot listening on http://{bind_address}");
     axum::serve(listener, app).await.expect("serve random bot");
 }
