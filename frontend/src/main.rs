@@ -24,6 +24,7 @@ struct BotResponse {
 fn App() -> impl IntoView {
     let board = RwSignal::new(Board::from_fen(START_FEN).expect("valid start position"));
     let selected = RwSignal::new(None::<Square>);
+    let dragged = RwSignal::new(None::<Square>);
     let history = RwSignal::new(Vec::<String>::new());
     let thinking = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
@@ -32,6 +33,7 @@ fn App() -> impl IntoView {
     let reset = move |_| {
         board.set(Board::from_fen(START_FEN).expect("valid start position"));
         selected.set(None);
+        dragged.set(None);
         history.set(Vec::new());
         thinking.set(false);
         error.set(None);
@@ -136,10 +138,53 @@ fn App() -> impl IntoView {
                                 <button
                                     class=move || square_class(board.get(), selected.get(), square)
                                     on:click=move |_| play_square(square)
+                                    on:dragover=move |event| {
+                                        if dragged.get_untracked().is_some() {
+                                            event.prevent_default();
+                                            if let Some(transfer) = event.data_transfer() {
+                                                transfer.set_drop_effect("move");
+                                            }
+                                        }
+                                    }
+                                    on:drop=move |event| {
+                                        event.prevent_default();
+                                        if dragged.get_untracked().is_some() {
+                                            play_square(square);
+                                        }
+                                        dragged.set(None);
+                                    }
                                     aria-label=move || square_name(square)
                                 >
                                     {move || board.get().piece_at(square).map(|piece| view! {
-                                        <img src=piece_src(piece) alt=piece_name(piece) draggable="false" />
+                                        <img
+                                            src=piece_src(piece)
+                                            alt=piece_name(piece)
+                                            draggable=if piece.color == Color::White { "true" } else { "false" }
+                                            on:dragstart=move |event| {
+                                                let current = board.get_untracked();
+                                                let can_drag = !thinking.get_untracked()
+                                                    && current.status() == Status::Ongoing
+                                                    && current.side_to_move == Color::White
+                                                    && current.piece_at(square)
+                                                        .is_some_and(|piece| piece.color == Color::White);
+
+                                                if !can_drag {
+                                                    event.prevent_default();
+                                                    return;
+                                                }
+
+                                                selected.set(Some(square));
+                                                dragged.set(Some(square));
+                                                if let Some(transfer) = event.data_transfer() {
+                                                    transfer.set_effect_allowed("move");
+                                                    let _ = transfer.set_data("text/plain", &square_name(square));
+                                                }
+                                            }
+                                            on:dragend=move |_| {
+                                                dragged.set(None);
+                                                selected.set(None);
+                                            }
+                                        />
                                     })}
                                     {(file == 0).then(|| view! { <span class="rank-label">{rank + 1}</span> })}
                                     {(rank == 0).then(|| view! { <span class="file-label">{(b'a' + file) as char}</span> })}
