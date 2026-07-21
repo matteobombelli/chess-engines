@@ -1,4 +1,4 @@
-use chess_core::{Board, Color, Piece, PieceKind, Square, Status};
+use chess_core::{Board, Color, Move, Piece, PieceKind, Square, Status};
 use gloo_net::http::Request;
 use leptos::mount::mount_to_body;
 use leptos::prelude::*;
@@ -29,6 +29,7 @@ fn App() -> impl IntoView {
     let thinking = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let game_id = RwSignal::new(0_u32);
+    let pending_promotion = RwSignal::new(None::<(Square, Square)>);
 
     let reset = move |_| {
         board.set(Board::from_fen(START_FEN).expect("valid start position"));
@@ -37,50 +38,11 @@ fn App() -> impl IntoView {
         history.set(Vec::new());
         thinking.set(false);
         error.set(None);
+        pending_promotion.set(None);
         game_id.update(|id| *id += 1);
     };
 
-    let play_square = move |square: Square| {
-        if thinking.get_untracked() || board.get_untracked().status() != Status::Ongoing {
-            return;
-        }
-
-        let current = board.get_untracked();
-        if current.side_to_move != Color::White {
-            return;
-        }
-
-        let Some(from) = selected.get_untracked() else {
-            if current
-                .piece_at(square)
-                .is_some_and(|piece| piece.color == Color::White)
-            {
-                selected.set(Some(square));
-            }
-            return;
-        };
-
-        let chosen = current
-            .get_legal_moves()
-            .into_iter()
-            .filter(|mv| mv.start_square == from && mv.end_square == square)
-            .find(|mv| mv.promotion == Some(PieceKind::Queen))
-            .or_else(|| {
-                current
-                    .get_legal_moves()
-                    .into_iter()
-                    .find(|mv| mv.start_square == from && mv.end_square == square)
-            });
-
-        let Some(mv) = chosen else {
-            selected.set(
-                current
-                    .piece_at(square)
-                    .and_then(|piece| (piece.color == Color::White).then_some(square)),
-            );
-            return;
-        };
-
+    let play_move = move |current: Board, mv| {
         let request_fen = current.to_fen();
         let mut after_player = current;
         after_player.make_move(mv);
@@ -93,6 +55,7 @@ fn App() -> impl IntoView {
         board.set(after_player.clone());
         history.update(|moves| moves.push(player_san.clone()));
         selected.set(None);
+        pending_promotion.set(None);
         error.set(None);
 
         if after_player.status() != Status::Ongoing {
@@ -115,6 +78,66 @@ fn App() -> impl IntoView {
                 Err(message) => error.set(Some(message)),
             }
         });
+    };
+
+    let play_square = move |square: Square| {
+        if pending_promotion.get_untracked().is_some()
+            || thinking.get_untracked()
+            || board.get_untracked().status() != Status::Ongoing
+        {
+            return;
+        }
+
+        let current = board.get_untracked();
+        if current.side_to_move != Color::White {
+            return;
+        }
+
+        let Some(from) = selected.get_untracked() else {
+            if current
+                .piece_at(square)
+                .is_some_and(|piece| piece.color == Color::White)
+            {
+                selected.set(Some(square));
+            }
+            return;
+        };
+
+        let candidates = moves_between(&current, from, square);
+
+        if candidates.len() > 1 && candidates.iter().all(|mv| mv.promotion.is_some()) {
+            pending_promotion.set(Some((from, square)));
+            dragged.set(None);
+            return;
+        }
+
+        let Some(mv) = candidates.into_iter().next() else {
+            selected.set(
+                current
+                    .piece_at(square)
+                    .and_then(|piece| (piece.color == Color::White).then_some(square)),
+            );
+            return;
+        };
+
+        play_move(current, mv);
+    };
+
+    let choose_promotion = move |kind: PieceKind| {
+        let Some((from, to)) = pending_promotion.get_untracked() else {
+            return;
+        };
+        let current = board.get_untracked();
+        if let Some(mv) = moves_between(&current, from, to)
+            .into_iter()
+            .find(|mv| mv.promotion == Some(kind))
+        {
+            play_move(current, mv);
+        } else {
+            pending_promotion.set(None);
+            selected.set(None);
+            error.set(Some("That promotion is no longer legal".to_string()));
+        }
     };
 
     view! {
@@ -192,6 +215,50 @@ fn App() -> impl IntoView {
                             }
                         }).collect_view()}
                     </div>
+                    {move || pending_promotion.get().map(|(from, _)| {
+                        let color = board.get().piece_at(from)
+                            .map(|piece| piece.color)
+                            .unwrap_or(Color::White);
+                        view! {
+                            <div
+                                class="promotion-overlay"
+                                role="dialog"
+                                aria-modal="true"
+                                aria-label="Choose promotion piece"
+                            >
+                                <div class="promotion-dialog">
+                                    <strong>"Promote pawn to"</strong>
+                                    <div class="promotion-options">
+                                        {[PieceKind::Queen, PieceKind::Rook, PieceKind::Bishop, PieceKind::Knight]
+                                            .into_iter()
+                                            .map(|kind| {
+                                                let piece = Piece { color, kind };
+                                                view! {
+                                                    <button
+                                                        class="promotion-option"
+                                                        aria-label=format!("Promote to {}", piece_kind_name(kind))
+                                                        on:click=move |_| choose_promotion(kind)
+                                                    >
+                                                        <img src=piece_src(piece) alt="" />
+                                                        <span>{piece_kind_name(kind)}</span>
+                                                    </button>
+                                                }
+                                            })
+                                            .collect_view()}
+                                    </div>
+                                    <button
+                                        class="promotion-cancel"
+                                        on:click=move |_| {
+                                            pending_promotion.set(None);
+                                            selected.set(None);
+                                        }
+                                    >
+                                        "Cancel"
+                                    </button>
+                                </div>
+                            </div>
+                        }
+                    })}
                 </div>
 
                 <aside>
@@ -295,6 +362,14 @@ fn square_class(board: Board, selected: Option<Square>, square: Square) -> Strin
     classes.join(" ")
 }
 
+fn moves_between(board: &Board, from: Square, to: Square) -> Vec<Move> {
+    board
+        .get_legal_moves()
+        .into_iter()
+        .filter(|mv| mv.start_square == from && mv.end_square == to)
+        .collect()
+}
+
 fn piece_src(piece: Piece) -> &'static str {
     match (piece.color, piece.kind) {
         (Color::White, PieceKind::Pawn) => "/projects/chessengines/public/white-pawn.png",
@@ -326,6 +401,17 @@ fn piece_name(piece: Piece) -> &'static str {
         (Color::Black, PieceKind::Rook) => "Black rook",
         (Color::Black, PieceKind::Queen) => "Black queen",
         (Color::Black, PieceKind::King) => "Black king",
+    }
+}
+
+fn piece_kind_name(kind: PieceKind) -> &'static str {
+    match kind {
+        PieceKind::Pawn => "pawn",
+        PieceKind::Knight => "knight",
+        PieceKind::Bishop => "bishop",
+        PieceKind::Rook => "rook",
+        PieceKind::Queen => "queen",
+        PieceKind::King => "king",
     }
 }
 
@@ -364,4 +450,26 @@ fn move_pairs(moves: &[String]) -> Vec<(usize, String, String)> {
 fn main() {
     console_error_panic_hook::set_once();
     mount_to_body(App);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promotion_destination_keeps_all_four_choices() {
+        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        let moves = moves_between(&board, Square::new(0, 6), Square::new(0, 7));
+        let promotions: Vec<_> = moves.into_iter().filter_map(|mv| mv.promotion).collect();
+
+        assert_eq!(
+            promotions,
+            vec![
+                PieceKind::Queen,
+                PieceKind::Rook,
+                PieceKind::Bishop,
+                PieceKind::Knight,
+            ]
+        );
+    }
 }

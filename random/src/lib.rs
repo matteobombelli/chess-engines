@@ -1,4 +1,4 @@
-use chess_core::Board;
+use chess_core::{Board, Move};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
@@ -18,13 +18,9 @@ pub struct BotResponse {
 
 /// Apply an optional SAN move to a FEN position, then play a random legal move.
 pub fn respond(request: BotRequest) -> Result<BotResponse, String> {
-    let mut board = Board::from_fen(&request.fen)?;
-    if let Some(san) = request.san {
-        board.san_to_move(&san)?;
-    }
+    let mut board = position_after_request(request)?;
 
-    let mv = *board
-        .get_legal_moves()
+    let mv = *candidate_moves(&board)
         .choose(&mut rand::thread_rng())
         .ok_or_else(|| "game is over: no legal moves".to_string())?;
     board.make_move(mv);
@@ -37,6 +33,19 @@ pub fn respond(request: BotRequest) -> Result<BotResponse, String> {
             .expect("move was recorded"),
         fen: board.to_fen(),
     })
+}
+
+fn position_after_request(request: BotRequest) -> Result<Board, String> {
+    let mut board = Board::from_fen(&request.fen)?;
+    if let Some(san) = request.san {
+        board.san_to_move(&san)?;
+    }
+    Ok(board)
+}
+
+/// Keep promotion variants as distinct candidates so bots can underpromote.
+fn candidate_moves(board: &Board) -> Vec<Move> {
+    board.get_legal_moves()
 }
 
 #[cfg(test)]
@@ -69,5 +78,37 @@ mod tests {
         })
         .unwrap_err();
         assert!(error.contains("illegal"));
+    }
+
+    #[test]
+    fn bot_considers_all_four_promotion_choices() {
+        let board = position_after_request(BotRequest {
+            fen: "4k3/8/8/8/8/8/p7/4K3 b - - 0 1".to_string(),
+            san: None,
+        })
+        .unwrap();
+        let promotions: Vec<_> = candidate_moves(&board)
+            .into_iter()
+            .filter_map(|mv| mv.promotion)
+            .collect();
+
+        assert_eq!(promotions.len(), 4);
+        assert!(promotions.contains(&chess_core::PieceKind::Rook));
+        assert!(promotions.contains(&chess_core::PieceKind::Bishop));
+        assert!(promotions.contains(&chess_core::PieceKind::Knight));
+    }
+
+    #[test]
+    fn bot_accepts_an_underpromotion_from_its_opponent() {
+        let response = respond(BotRequest {
+            fen: "4k3/P7/8/8/8/8/8/4K3 w - - 0 1".to_string(),
+            san: Some("a8=N".to_string()),
+        })
+        .expect("bot should accept a legal underpromotion");
+
+        let mut expected = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").unwrap();
+        expected.san_to_move("a8=N").unwrap();
+        expected.san_to_move(&response.san).unwrap();
+        assert_eq!(response.fen, expected.to_fen());
     }
 }
