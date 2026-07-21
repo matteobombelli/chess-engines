@@ -338,8 +338,8 @@ fn status_text(board: &Board, thinking: bool) -> &'static str {
         "Random is thinking…"
     } else {
         match board.status() {
-            Status::Checkmate if board.side_to_move == Color::White => "Checkmate — Random wins",
-            Status::Checkmate => "Checkmate — You win",
+            Status::Checkmate if board.side_to_move == Color::White => "Checkmate - Random wins",
+            Status::Checkmate => "Checkmate - You win",
             Status::Stalemate => "Draw by stalemate",
             Status::Ongoing if board.is_in_check() => "Your king is in check",
             Status::Ongoing => "Your move",
