@@ -24,6 +24,8 @@ require_command rsync
 require_command systemctl
 require_command curl
 
+CARGO_BIN_DIR="$(dirname -- "$(command -v "$CARGO_COMMAND")")"
+
 cd "$REPO_ROOT"
 
 if [[ -n "$(git status --porcelain)" ]]; then
@@ -40,7 +42,8 @@ echo "Building random bot..."
 echo "Building frontend..."
 (
     cd frontend
-    NO_COLOR=true "$TRUNK_COMMAND" build --release --public-url "$PUBLIC_URL"
+    PATH="$CARGO_BIN_DIR:$PATH" NO_COLOR=true \
+        "$TRUNK_COMMAND" build --release --public-url "$PUBLIC_URL"
 )
 
 echo "Publishing frontend to $STATIC_ROOT..."
