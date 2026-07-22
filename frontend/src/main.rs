@@ -79,6 +79,10 @@ fn App() -> impl IntoView {
     };
 
     let switch_sides = move |_| {
+        if side_switch_locked(history.get_untracked().len()) {
+            return;
+        }
+
         let color = match player_color.get_untracked() {
             Color::White => Color::Black,
             Color::Black => Color::White,
@@ -198,7 +202,13 @@ fn App() -> impl IntoView {
                     <h1>"Play a bot"</h1>
                 </div>
                 <div class="header-actions">
-                    <button class="switch-side" on:click=switch_sides>"Switch sides"</button>
+                    <button
+                        class="switch-side"
+                        disabled=move || side_switch_locked(history.get().len())
+                        on:click=switch_sides
+                    >
+                        "Switch sides"
+                    </button>
                     <button class="reset" on:click=reset>"New game"</button>
                 </div>
             </header>
@@ -332,13 +342,12 @@ fn App() -> impl IntoView {
                         </select>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
-                            "How "
+                            "About "
                             {move || selected_model.get().name()}
-                            " works"
                             <span aria-hidden="true">" ↓"</span>
                         </a>
                         <p class="player-side">
-                            "You’re playing "
+                            "You're playing "
                             <strong>{move || color_name(player_color.get())}</strong>
                         </p>
                     </div>
@@ -385,7 +394,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"About Random"</h2>
                             </div>
                             <p class="about-intro">
-                                "Random is the simplest engine in the collection. It understands the rules of chess, but it has no strategy: every legal move has the same chance of being played."
+                                "Random knows the rules of chess but has no strategy. Each legal move has an equal chance of being selected."
                             </p>
                         </div>
 
@@ -394,7 +403,7 @@ fn App() -> impl IntoView {
                                 <span class="step-number">"01"</span>
                                 <h3>"Read the position"</h3>
                                 <p>
-                                    "The engine receives the current board as FEN and applies your move from standard algebraic notation (SAN)."
+                                    "The bot receives the current position as FEN. After you move, it receives that move in standard algebraic notation (SAN)."
                                 </p>
                             </article>
                             <article>
@@ -414,9 +423,9 @@ fn App() -> impl IntoView {
                         </div>
 
                         <div class="about-summary">
-                            <strong>"What it doesn’t do"</strong>
+                            <strong>"Limits"</strong>
                             <p>
-                                "Random does not search ahead, score positions, learn from games, or remember earlier choices. It can play a checkmating move only by landing on it by chance—and it can just as easily hang its queen."
+                                "There is no search, position evaluation, training, or game memory. Checkmates and blunders are both accidental."
                             </p>
                         </div>
                     </section>
@@ -640,7 +649,7 @@ fn color_name(color: Color) -> &'static str {
 
 fn status_text(board: &Board, thinking: bool, player_color: Color) -> &'static str {
     if thinking {
-        "Bot is thinking…"
+        "Bot is thinking..."
     } else {
         match board.status() {
             Status::Checkmate if board.side_to_move == player_color => "Checkmate - Bot wins",
@@ -660,6 +669,10 @@ fn move_count(half_moves: usize) -> String {
     } else {
         format!("{}.5", half_moves / 2)
     }
+}
+
+fn side_switch_locked(half_moves: usize) -> bool {
+    half_moves >= 2
 }
 
 fn move_pairs(moves: &[String]) -> Vec<(usize, String, String)> {
@@ -717,6 +730,14 @@ mod tests {
         assert_eq!(move_count(1), "0.5");
         assert_eq!(move_count(2), "1");
         assert_eq!(move_count(3), "1.5");
+    }
+
+    #[test]
+    fn side_switch_locks_after_one_full_move() {
+        assert!(!side_switch_locked(0));
+        assert!(!side_switch_locked(1));
+        assert!(side_switch_locked(2));
+        assert!(side_switch_locked(3));
     }
 
     #[test]
