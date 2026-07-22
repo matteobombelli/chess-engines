@@ -20,6 +20,11 @@ struct BotResponse {
     fen: String,
 }
 
+#[derive(Deserialize)]
+struct BotErrorResponse {
+    error: String,
+}
+
 #[component]
 fn App() -> impl IntoView {
     let board = RwSignal::new(Board::from_fen(START_FEN).expect("valid start position"));
@@ -285,7 +290,7 @@ fn App() -> impl IntoView {
                     <div class="panel moves-panel">
                         <div class="moves-heading">
                             <span>"Moves"</span>
-                            <small>{move || history.get().len()}</small>
+                            <small>{move || move_count(history.get().len())}</small>
                         </div>
                         <div class="moves-list">
                             {move || move_pairs(&history.get()).into_iter().map(|(number, white, black)| view! {
@@ -311,23 +316,37 @@ async fn request_bot(
     san: String,
     mut after_player: Board,
 ) -> Result<(Board, String), String> {
-    let response = Request::post(BOT_URL)
-        .json(&BotRequest {
-            fen,
-            san: Some(san),
-        })
-        .map_err(|error| error.to_string())?
-        .send()
-        .await
-        .map_err(|_| {
-            "Could not reach the random bot. Is `cargo run -p random` running?".to_string()
-        })?;
+    let payload = BotRequest {
+        fen,
+        san: Some(san),
+    };
+    let mut gateway_retries = 1;
+
+    let response = loop {
+        let response = Request::post(BOT_URL)
+            .json(&payload)
+            .map_err(|error| error.to_string())?
+            .send()
+            .await
+            .map_err(|_| "Could not reach the random bot. Please try again.".to_string())?;
+
+        if is_gateway_error(response.status()) && gateway_retries > 0 {
+            gateway_retries -= 1;
+            continue;
+        }
+        break response;
+    };
 
     if !response.ok() {
-        return Err(response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Bot rejected the move".into()));
+        let status = response.status();
+        if is_gateway_error(status) {
+            return Err("The random bot is temporarily unavailable. Please try again.".into());
+        }
+
+        return Err(match response.json::<BotErrorResponse>().await {
+            Ok(body) => body.error,
+            Err(_) => format!("The random bot request failed (HTTP {status})."),
+        });
     }
 
     let reply: BotResponse = response.json().await.map_err(|error| error.to_string())?;
@@ -336,6 +355,10 @@ async fn request_bot(
         return Err("Bot returned a mismatched position".to_string());
     }
     Ok((after_player, reply.san))
+}
+
+fn is_gateway_error(status: u16) -> bool {
+    matches!(status, 502..=504)
 }
 
 fn square_class(board: Board, selected: Option<Square>, square: Square) -> String {
@@ -427,9 +450,19 @@ fn status_text(board: &Board, thinking: bool) -> &'static str {
             Status::Checkmate if board.side_to_move == Color::White => "Checkmate - Random wins",
             Status::Checkmate => "Checkmate - You win",
             Status::Stalemate => "Draw by stalemate",
+            Status::ThreefoldRepetition => "Draw by threefold repetition",
+            Status::FiftyMoveRule => "Draw by the 50-move rule",
             Status::Ongoing if board.is_in_check() => "Your king is in check",
             Status::Ongoing => "Your move",
         }
+    }
+}
+
+fn move_count(half_moves: usize) -> String {
+    if half_moves.is_multiple_of(2) {
+        (half_moves / 2).to_string()
+    } else {
+        format!("{}.5", half_moves / 2)
     }
 }
 
@@ -471,5 +504,22 @@ mod tests {
                 PieceKind::Knight,
             ]
         );
+    }
+
+    #[test]
+    fn gateway_failures_are_retryable() {
+        assert!(is_gateway_error(502));
+        assert!(is_gateway_error(503));
+        assert!(is_gateway_error(504));
+        assert!(!is_gateway_error(400));
+        assert!(!is_gateway_error(500));
+    }
+
+    #[test]
+    fn move_count_uses_half_moves() {
+        assert_eq!(move_count(0), "0");
+        assert_eq!(move_count(1), "0.5");
+        assert_eq!(move_count(2), "1");
+        assert_eq!(move_count(3), "1.5");
     }
 }

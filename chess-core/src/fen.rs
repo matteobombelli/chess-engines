@@ -62,6 +62,9 @@ impl Board {
             .parse()
             .map_err(|_| "bad fullmove number".to_string())?;
 
+        // A FEN describes one position, not the moves that led to it.
+        board.reset_position_history();
+
         Ok(board)
     }
 

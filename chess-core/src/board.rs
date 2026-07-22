@@ -84,12 +84,16 @@ pub struct Board {
 
     /// The moves played on this board so far, in Standard Algebraic Notation
     pub san_history: Vec<String>,
+
+    /// Canonical positions reached during this game, including the initial one.
+    /// Move clocks are excluded because they do not affect repetition.
+    pub(crate) position_history: Vec<String>,
 }
 
 impl Board {
     /// An empty board. White to move, no castling rights, no pieces
     pub fn empty() -> Board {
-        Board {
+        let mut board = Board {
             squares: [None; 64],
             side_to_move: Color::White,
             castling: CastlingRights {
@@ -102,7 +106,10 @@ impl Board {
             halfmove_clock: 0,
             fullmove_number: 1,
             san_history: Vec::new(),
-        }
+            position_history: Vec::new(),
+        };
+        board.reset_position_history();
+        board
     }
 
     /// The piece on sq, or None if the square is empty

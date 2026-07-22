@@ -17,6 +17,8 @@ pub enum Status {
     Ongoing,
     Checkmate,
     Stalemate,
+    ThreefoldRepetition,
+    FiftyMoveRule,
 }
 
 impl Board {
@@ -27,6 +29,7 @@ impl Board {
         // the resulting position where `side_to_move` is now the opponent
         let body: String = self.san_body(mv);
         self.apply_move(mv);
+        self.record_current_position();
         let suffix: &str = match self.status() {
             Status::Checkmate => "#",
             _ if self.is_in_check() => "+",
@@ -153,16 +156,72 @@ impl Board {
         }
     }
 
-    /// Classify the position for the side to move: a side with no legal moves is
-    /// checkmated if it is in check, otherwise stalemated
+    /// Classify the position for the side to move. Checkmate and stalemate take
+    /// precedence over automatic draw-rule handling.
     pub fn status(&self) -> Status {
-        if !self.get_legal_moves().is_empty() {
-            Status::Ongoing
-        } else if self.is_in_check() {
-            Status::Checkmate
-        } else {
-            Status::Stalemate
+        if self.get_legal_moves().is_empty() {
+            return if self.is_in_check() {
+                Status::Checkmate
+            } else {
+                Status::Stalemate
+            };
         }
+
+        if self.halfmove_clock >= 100 {
+            return Status::FiftyMoveRule;
+        }
+
+        if self.current_position_repetitions() >= 3 {
+            return Status::ThreefoldRepetition;
+        }
+
+        Status::Ongoing
+    }
+
+    pub(crate) fn reset_position_history(&mut self) {
+        self.position_history.clear();
+        self.record_current_position();
+    }
+
+    fn record_current_position(&mut self) {
+        self.position_history.push(self.current_position_key());
+    }
+
+    fn current_position_repetitions(&self) -> usize {
+        let Some(current) = self.position_history.last() else {
+            return 0;
+        };
+        self.position_history
+            .iter()
+            .filter(|position| *position == current)
+            .count()
+    }
+
+    /// Piece placement, side to move, castling rights, and any en-passant right
+    /// that changes the legal moves are the only inputs to repetition identity.
+    fn current_position_key(&self) -> String {
+        let fen = self.to_fen();
+        let fields: Vec<&str> = fen.split_whitespace().collect();
+        let en_passant = if self.has_legal_en_passant_capture() {
+            fields[3]
+        } else {
+            "-"
+        };
+        format!(
+            "{} {} {} {}",
+            fields[0], fields[1], fields[2], en_passant
+        )
+    }
+
+    fn has_legal_en_passant_capture(&self) -> bool {
+        let Some(target) = self.en_passant else {
+            return false;
+        };
+        self.get_legal_moves().into_iter().any(|mv| {
+            mv.piece.kind == PieceKind::Pawn
+                && mv.end_square == target
+                && mv.start_square.file() != target.file()
+        })
     }
 
     /// All pseudo-legal moves for the side to move, ignoring whether they leave
@@ -536,5 +595,63 @@ mod tests {
             .expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Stalemate);
+    }
+
+    #[test]
+    fn detects_threefold_repetition() {
+        let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mut board = Board::from_fen(start).expect("start FEN should parse");
+
+        for san in [
+            "Nf3", "Nf6", "Ng1", "Ng8", "Nf3", "Nf6", "Ng1", "Ng8",
+        ] {
+            board
+                .san_to_move(san)
+                .expect("repetition move should be legal");
+        }
+
+        assert_eq!(board.status(), Status::ThreefoldRepetition);
+    }
+
+    #[test]
+    fn detects_fifty_move_rule_at_one_hundred_halfmoves() {
+        let mut board = Board::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 99 50")
+            .expect("FEN should parse");
+
+        assert_eq!(board.status(), Status::Ongoing);
+        board.san_to_move("Rb1").expect("rook move should be legal");
+        assert_eq!(board.halfmove_clock, 100);
+        assert_eq!(board.status(), Status::FiftyMoveRule);
+    }
+
+    #[test]
+    fn checkmate_takes_precedence_over_fifty_move_rule() {
+        let board = Board::from_fen(
+            "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 100 51",
+        )
+        .expect("FEN should parse");
+
+        assert_eq!(board.status(), Status::Checkmate);
+    }
+
+    #[test]
+    fn repetition_key_ignores_unusable_en_passant_target() {
+        let without_target = Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - - 0 1")
+            .expect("FEN should parse");
+        let unusable_target = Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1")
+            .expect("FEN should parse");
+        let capturable_target = Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
+            .expect("FEN should parse");
+        let same_without_target = Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1")
+            .expect("FEN should parse");
+
+        assert_eq!(
+            without_target.current_position_key(),
+            unusable_target.current_position_key()
+        );
+        assert_ne!(
+            capturable_target.current_position_key(),
+            same_without_target.current_position_key()
+        );
     }
 }
