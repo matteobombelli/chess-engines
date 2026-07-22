@@ -55,7 +55,7 @@ mod tests {
     const START: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
     #[test]
-    fn fen_in_san_in_legal_san_and_fen_out() {
+    fn bot_can_reply_as_black() {
         let response = respond(BotRequest {
             fen: START.to_string(),
             san: Some("e4".to_string()),
@@ -68,6 +68,22 @@ mod tests {
             .san_to_move(&response.san)
             .expect("bot response must be legal SAN");
         assert_eq!(response.fen, expected.to_fen());
+    }
+
+    #[test]
+    fn bot_can_make_the_opening_move_as_white() {
+        let response = respond(BotRequest {
+            fen: START.to_string(),
+            san: None,
+        })
+        .expect("bot should play from the side to move");
+
+        let mut expected = Board::from_fen(START).unwrap();
+        expected
+            .san_to_move(&response.san)
+            .expect("bot response must be a legal White move");
+        assert_eq!(response.fen, expected.to_fen());
+        assert_eq!(expected.side_to_move, chess_core::Color::Black);
     }
 
     #[test]

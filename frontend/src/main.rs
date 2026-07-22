@@ -8,6 +8,32 @@ use serde::{Deserialize, Serialize};
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 const BOT_URL: &str = "/projects/chessengines/api/move";
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Model {
+    Random,
+}
+
+impl Model {
+    fn from_value(value: &str) -> Self {
+        match value {
+            "random" => Self::Random,
+            _ => Self::Random,
+        }
+    }
+
+    fn name(self) -> &'static str {
+        match self {
+            Self::Random => "Random",
+        }
+    }
+
+    fn note(self) -> &'static str {
+        match self {
+            Self::Random => "Chooses uniformly from every legal move.",
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct BotRequest {
     fen: String,
@@ -35,16 +61,40 @@ fn App() -> impl IntoView {
     let error = RwSignal::new(None::<String>);
     let game_id = RwSignal::new(0_u32);
     let pending_promotion = RwSignal::new(None::<(Square, Square)>);
+    let player_color = RwSignal::new(Color::White);
+    let selected_model = RwSignal::new(Model::Random);
 
     let reset = move |_| {
-        board.set(Board::from_fen(START_FEN).expect("valid start position"));
-        selected.set(None);
-        dragged.set(None);
-        history.set(Vec::new());
-        thinking.set(false);
-        error.set(None);
-        pending_promotion.set(None);
-        game_id.update(|id| *id += 1);
+        start_game(
+            player_color.get_untracked(),
+            board,
+            selected,
+            dragged,
+            history,
+            thinking,
+            error,
+            game_id,
+            pending_promotion,
+        );
+    };
+
+    let switch_sides = move |_| {
+        let color = match player_color.get_untracked() {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+        player_color.set(color);
+        start_game(
+            color,
+            board,
+            selected,
+            dragged,
+            history,
+            thinking,
+            error,
+            game_id,
+            pending_promotion,
+        );
     };
 
     let play_move = move |current: Board, mv| {
@@ -67,22 +117,16 @@ fn App() -> impl IntoView {
             return;
         }
 
-        thinking.set(true);
-        let request_id = game_id.get_untracked();
-        spawn_local(async move {
-            let result = request_bot(request_fen, player_san, after_player).await;
-            if game_id.get_untracked() != request_id {
-                return;
-            }
-            thinking.set(false);
-            match result {
-                Ok((next, bot_san)) => {
-                    board.set(next);
-                    history.update(|moves| moves.push(bot_san));
-                }
-                Err(message) => error.set(Some(message)),
-            }
-        });
+        start_bot_turn(
+            board,
+            history,
+            thinking,
+            error,
+            game_id,
+            request_fen,
+            Some(player_san),
+            after_player,
+        );
     };
 
     let play_square = move |square: Square| {
@@ -94,14 +138,15 @@ fn App() -> impl IntoView {
         }
 
         let current = board.get_untracked();
-        if current.side_to_move != Color::White {
+        let color = player_color.get_untracked();
+        if current.side_to_move != color {
             return;
         }
 
         let Some(from) = selected.get_untracked() else {
             if current
                 .piece_at(square)
-                .is_some_and(|piece| piece.color == Color::White)
+                .is_some_and(|piece| piece.color == color)
             {
                 selected.set(Some(square));
             }
@@ -120,7 +165,7 @@ fn App() -> impl IntoView {
             selected.set(
                 current
                     .piece_at(square)
-                    .and_then(|piece| (piece.color == Color::White).then_some(square)),
+                    .and_then(|piece| (piece.color == color).then_some(square)),
             );
             return;
         };
@@ -152,17 +197,23 @@ fn App() -> impl IntoView {
                     <p class="eyebrow">"CHESS ENGINES"</p>
                     <h1>"Play a bot"</h1>
                 </div>
-                <button class="reset" on:click=reset>"New game"</button>
+                <div class="header-actions">
+                    <button class="switch-side" on:click=switch_sides>"Switch sides"</button>
+                    <button class="reset" on:click=reset>"New game"</button>
+                </div>
             </header>
 
             <section class="game-layout">
                 <div class="board-wrap" aria-label="Chess board">
                     <div class="board">
-                        {(0..64).map(|index| {
-                            let file = (index % 8) as u8;
-                            let rank = 7 - (index / 8) as u8;
-                            let square = Square::new(file, rank);
-                            view! {
+                        {move || {
+                            (0..64).map(|index| {
+                                let column = (index % 8) as u8;
+                                let row = (index / 8) as u8;
+                                let square = oriented_square(index, player_color.get());
+                                let file = square.file();
+                                let rank = square.rank();
+                                view! {
                                 <button
                                     class=move || square_class(board.get(), selected.get(), square)
                                     on:click=move |_| play_square(square)
@@ -187,14 +238,15 @@ fn App() -> impl IntoView {
                                         <img
                                             src=piece_src(piece)
                                             alt=piece_name(piece)
-                                            draggable=if piece.color == Color::White { "true" } else { "false" }
+                                            draggable=if piece.color == player_color.get() { "true" } else { "false" }
                                             on:dragstart=move |event| {
                                                 let current = board.get_untracked();
+                                                let color = player_color.get_untracked();
                                                 let can_drag = !thinking.get_untracked()
                                                     && current.status() == Status::Ongoing
-                                                    && current.side_to_move == Color::White
+                                                    && current.side_to_move == color
                                                     && current.piece_at(square)
-                                                        .is_some_and(|piece| piece.color == Color::White);
+                                                        .is_some_and(|piece| piece.color == color);
 
                                                 if !can_drag {
                                                     event.prevent_default();
@@ -214,16 +266,17 @@ fn App() -> impl IntoView {
                                             }
                                         />
                                     })}
-                                    {(file == 0).then(|| view! { <span class="rank-label">{rank + 1}</span> })}
-                                    {(rank == 0).then(|| view! { <span class="file-label">{(b'a' + file) as char}</span> })}
+                                    {(column == 0).then(|| view! { <span class="rank-label">{rank + 1}</span> })}
+                                    {(row == 7).then(|| view! { <span class="file-label">{(b'a' + file) as char}</span> })}
                                 </button>
                             }
-                        }).collect_view()}
+                            }).collect_view()
+                        }}
                     </div>
                     {move || pending_promotion.get().map(|(from, _)| {
                         let color = board.get().piece_at(from)
                             .map(|piece| piece.color)
-                            .unwrap_or(Color::White);
+                            .unwrap_or_else(|| player_color.get());
                         view! {
                             <div
                                 class="promotion-overlay"
@@ -269,17 +322,32 @@ fn App() -> impl IntoView {
                 <aside>
                     <div class="panel bot-panel">
                         <label for="bot">"Opponent"</label>
-                        <select id="bot">
+                        <select
+                            id="bot"
+                            on:change=move |event| {
+                                selected_model.set(Model::from_value(&event_target_value(&event)));
+                            }
+                        >
                             <option value="random">"Random"</option>
                         </select>
-                        <p class="bot-note">"Chooses uniformly from every legal move."</p>
+                        <p class="bot-note">{move || selected_model.get().note()}</p>
+                        <a class="about-link" href="#about-model">
+                            "How "
+                            {move || selected_model.get().name()}
+                            " works"
+                            <span aria-hidden="true">" ↓"</span>
+                        </a>
+                        <p class="player-side">
+                            "You’re playing "
+                            <strong>{move || color_name(player_color.get())}</strong>
+                        </p>
                     </div>
 
                     <div class="panel status-panel">
                         <span class=move || if thinking.get() { "status-dot thinking" } else { "status-dot" }></span>
                         <div>
                             <small>"STATUS"</small>
-                            <strong>{move || status_text(&board.get(), thinking.get())}</strong>
+                            <strong>{move || status_text(&board.get(), thinking.get(), player_color.get())}</strong>
                         </div>
                     </div>
 
@@ -301,24 +369,136 @@ fn App() -> impl IntoView {
                                 </div>
                             }).collect_view()}
                             {move || history.get().is_empty().then(|| view! {
-                                <p class="empty-moves">"Your moves will appear here."</p>
+                                <p class="empty-moves">"Moves will appear here."</p>
                             })}
                         </div>
                     </div>
                 </aside>
             </section>
+
+            {move || match selected_model.get() {
+                Model::Random => view! {
+                    <section class="about-model" id="about-model" aria-labelledby="about-model-title">
+                        <div class="about-heading">
+                            <div>
+                                <p class="eyebrow">"ABOUT THE MODEL"</p>
+                                <h2 id="about-model-title">"About Random"</h2>
+                            </div>
+                            <p class="about-intro">
+                                "Random is the simplest engine in the collection. It understands the rules of chess, but it has no strategy: every legal move has the same chance of being played."
+                            </p>
+                        </div>
+
+                        <div class="about-steps">
+                            <article>
+                                <span class="step-number">"01"</span>
+                                <h3>"Read the position"</h3>
+                                <p>
+                                    "The engine receives the current board as FEN and applies your move from standard algebraic notation (SAN)."
+                                </p>
+                            </article>
+                            <article>
+                                <span class="step-number">"02"</span>
+                                <h3>"Find every legal move"</h3>
+                                <p>
+                                    "It generates all moves allowed in that position, including castling, en passant, and each promotion choice. Moves that leave its king in check are excluded."
+                                </p>
+                            </article>
+                            <article>
+                                <span class="step-number">"03"</span>
+                                <h3>"Pick one at random"</h3>
+                                <p>
+                                    "One candidate is selected uniformly, then returned as SAN together with the resulting FEN. The same position can produce a different reply each time."
+                                </p>
+                            </article>
+                        </div>
+
+                        <div class="about-summary">
+                            <strong>"What it doesn’t do"</strong>
+                            <p>
+                                "Random does not search ahead, score positions, learn from games, or remember earlier choices. It can play a checkmating move only by landing on it by chance—and it can just as easily hang its queen."
+                            </p>
+                        </div>
+                    </section>
+                },
+            }}
         </main>
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn start_game(
+    player_color: Color,
+    board: RwSignal<Board>,
+    selected: RwSignal<Option<Square>>,
+    dragged: RwSignal<Option<Square>>,
+    history: RwSignal<Vec<String>>,
+    thinking: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    game_id: RwSignal<u32>,
+    pending_promotion: RwSignal<Option<(Square, Square)>>,
+) {
+    let starting_board = Board::from_fen(START_FEN).expect("valid start position");
+    board.set(starting_board.clone());
+    selected.set(None);
+    dragged.set(None);
+    history.set(Vec::new());
+    thinking.set(false);
+    error.set(None);
+    pending_promotion.set(None);
+    game_id.update(|id| *id += 1);
+
+    if player_color == Color::Black {
+        start_bot_turn(
+            board,
+            history,
+            thinking,
+            error,
+            game_id,
+            START_FEN.to_string(),
+            None,
+            starting_board,
+        );
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn start_bot_turn(
+    board: RwSignal<Board>,
+    history: RwSignal<Vec<String>>,
+    thinking: RwSignal<bool>,
+    error: RwSignal<Option<String>>,
+    game_id: RwSignal<u32>,
+    request_fen: String,
+    player_san: Option<String>,
+    before_bot: Board,
+) {
+    thinking.set(true);
+    let request_id = game_id.get_untracked();
+    spawn_local(async move {
+        let result = request_bot(request_fen, player_san, before_bot).await;
+        if game_id.get_untracked() != request_id {
+            return;
+        }
+        thinking.set(false);
+        match result {
+            Ok((next, bot_san)) => {
+                board.set(next);
+                history.update(|moves| moves.push(bot_san));
+            }
+            Err(message) => error.set(Some(message)),
+        }
+    });
+}
+
 async fn request_bot(
     fen: String,
-    san: String,
-    mut after_player: Board,
+    player_san: Option<String>,
+    mut before_bot: Board,
 ) -> Result<(Board, String), String> {
     let payload = BotRequest {
         fen,
-        san: Some(san),
+        san: player_san,
     };
     let mut gateway_retries = 1;
 
@@ -328,7 +508,7 @@ async fn request_bot(
             .map_err(|error| error.to_string())?
             .send()
             .await
-            .map_err(|_| "Could not reach the random bot. Please try again.".to_string())?;
+            .map_err(|_| "Could not reach the bot. Please try again.".to_string())?;
 
         if is_gateway_error(response.status()) && gateway_retries > 0 {
             gateway_retries -= 1;
@@ -340,21 +520,21 @@ async fn request_bot(
     if !response.ok() {
         let status = response.status();
         if is_gateway_error(status) {
-            return Err("The random bot is temporarily unavailable. Please try again.".into());
+            return Err("The bot is temporarily unavailable. Please try again.".into());
         }
 
         return Err(match response.json::<BotErrorResponse>().await {
             Ok(body) => body.error,
-            Err(_) => format!("The random bot request failed (HTTP {status})."),
+            Err(_) => format!("The bot request failed (HTTP {status})."),
         });
     }
 
     let reply: BotResponse = response.json().await.map_err(|error| error.to_string())?;
-    after_player.san_to_move(&reply.san)?;
-    if after_player.to_fen() != reply.fen {
+    before_bot.san_to_move(&reply.san)?;
+    if before_bot.to_fen() != reply.fen {
         return Err("Bot returned a mismatched position".to_string());
     }
-    Ok((after_player, reply.san))
+    Ok((before_bot, reply.san))
 }
 
 fn is_gateway_error(status: u16) -> bool {
@@ -391,6 +571,15 @@ fn moves_between(board: &Board, from: Square, to: Square) -> Vec<Move> {
         .into_iter()
         .filter(|mv| mv.start_square == from && mv.end_square == to)
         .collect()
+}
+
+fn oriented_square(index: usize, player_color: Color) -> Square {
+    let column = (index % 8) as u8;
+    let row = (index / 8) as u8;
+    match player_color {
+        Color::White => Square::new(column, 7 - row),
+        Color::Black => Square::new(7 - column, row),
+    }
 }
 
 fn piece_src(piece: Piece) -> &'static str {
@@ -442,12 +631,19 @@ fn square_name(square: Square) -> String {
     format!("{}{}", (b'a' + square.file()) as char, square.rank() + 1)
 }
 
-fn status_text(board: &Board, thinking: bool) -> &'static str {
+fn color_name(color: Color) -> &'static str {
+    match color {
+        Color::White => "White",
+        Color::Black => "Black",
+    }
+}
+
+fn status_text(board: &Board, thinking: bool, player_color: Color) -> &'static str {
     if thinking {
-        "Random is thinking…"
+        "Bot is thinking…"
     } else {
         match board.status() {
-            Status::Checkmate if board.side_to_move == Color::White => "Checkmate - Random wins",
+            Status::Checkmate if board.side_to_move == player_color => "Checkmate - Bot wins",
             Status::Checkmate => "Checkmate - You win",
             Status::Stalemate => "Draw by stalemate",
             Status::ThreefoldRepetition => "Draw by threefold repetition",
@@ -521,5 +717,30 @@ mod tests {
         assert_eq!(move_count(1), "0.5");
         assert_eq!(move_count(2), "1");
         assert_eq!(move_count(3), "1.5");
+    }
+
+    #[test]
+    fn checkmate_winner_respects_the_players_side() {
+        let board = Board::from_fen(
+            "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
+        )
+        .unwrap();
+
+        assert_eq!(
+            status_text(&board, false, Color::White),
+            "Checkmate - Bot wins"
+        );
+        assert_eq!(
+            status_text(&board, false, Color::Black),
+            "Checkmate - You win"
+        );
+    }
+
+    #[test]
+    fn board_orientation_puts_the_players_pieces_at_the_bottom() {
+        assert_eq!(oriented_square(0, Color::White), Square::new(0, 7));
+        assert_eq!(oriented_square(63, Color::White), Square::new(7, 0));
+        assert_eq!(oriented_square(0, Color::Black), Square::new(7, 0));
+        assert_eq!(oriented_square(63, Color::Black), Square::new(0, 7));
     }
 }
