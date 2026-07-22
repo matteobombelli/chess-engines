@@ -403,7 +403,7 @@ fn App() -> impl IntoView {
                                 <span class="step-number">"01"</span>
                                 <h3>"Read the position"</h3>
                                 <p>
-                                    "The bot receives the current position as FEN. After you move, it receives that move in standard algebraic notation (SAN)."
+                                    "The bot receives the current position in Forsyth Edwards Notation (FEN). After you move, it receives that move in Standard Algebraic Notation (SAN)."
                                 </p>
                             </article>
                             <article>
