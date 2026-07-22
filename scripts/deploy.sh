@@ -40,7 +40,7 @@ echo "Building random bot..."
 echo "Building frontend..."
 (
     cd frontend
-    "$TRUNK_COMMAND" build --release --public-url "$PUBLIC_URL"
+    NO_COLOR=true "$TRUNK_COMMAND" build --release --public-url "$PUBLIC_URL"
 )
 
 echo "Publishing frontend to $STATIC_ROOT..."
