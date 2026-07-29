@@ -35,9 +35,16 @@ impl Model {
 }
 
 #[derive(Serialize)]
+/// The whole game as PGN movetext.
+///
+/// One field, one source of truth. The bot replays it to rebuild the position,
+/// so there is no FEN that could disagree with the moves — and the learned
+/// engines get the move history they predict from, which a position cannot
+/// supply, since many move orders reach the same board.
+///
+/// An empty string means the game has not started and the bot moves first.
 struct BotRequest {
-    fen: String,
-    san: Option<String>,
+    san: String,
 }
 
 #[derive(Deserialize)]
@@ -102,9 +109,11 @@ fn App() -> impl IntoView {
     };
 
     let play_move = move |current: Board, mv| {
-        let request_fen = current.to_fen();
         let mut after_player = current;
         after_player.make_move(mv);
+        // The game so far, taken from the board itself rather than the display
+        // list, so what we send can never disagree with the position we are in.
+        let movetext = after_player.export_san();
         let player_san = after_player
             .san_history
             .last()
@@ -127,8 +136,7 @@ fn App() -> impl IntoView {
             thinking,
             error,
             game_id,
-            request_fen,
-            Some(player_san),
+            movetext,
             after_player,
         );
     };
@@ -464,8 +472,8 @@ fn start_game(
             thinking,
             error,
             game_id,
-            START_FEN.to_string(),
-            None,
+            // Nothing has been played yet, so the bot opens.
+            String::new(),
             starting_board,
         );
     }
@@ -478,14 +486,13 @@ fn start_bot_turn(
     thinking: RwSignal<bool>,
     error: RwSignal<Option<String>>,
     game_id: RwSignal<u32>,
-    request_fen: String,
-    player_san: Option<String>,
+    movetext: String,
     before_bot: Board,
 ) {
     thinking.set(true);
     let request_id = game_id.get_untracked();
     spawn_local(async move {
-        let result = request_bot(request_fen, player_san, before_bot).await;
+        let result = request_bot(movetext, before_bot).await;
         if game_id.get_untracked() != request_id {
             return;
         }
@@ -501,14 +508,10 @@ fn start_bot_turn(
 }
 
 async fn request_bot(
-    fen: String,
-    player_san: Option<String>,
+    movetext: String,
     mut before_bot: Board,
 ) -> Result<(Board, String), String> {
-    let payload = BotRequest {
-        fen,
-        san: player_san,
-    };
+    let payload = BotRequest { san: movetext };
     let mut gateway_retries = 1;
 
     let response = loop {

@@ -103,14 +103,33 @@ impl Board {
         out
     }
 
+    /// The full Standard Algebraic Notation for a legal move, including any
+    /// check or checkmate suffix.
+    ///
+    /// Unlike `san_body` this needs the position *after* the move to know
+    /// whether to append `+` or `#`, so it works on a copy. Callers outside this
+    /// crate use it to label a move for display or logging without disturbing
+    /// the board they are reasoning about.
+    pub fn san_for(&self, mv: Move) -> String {
+        let mut next: Board = self.clone();
+        next.make_move(mv);
+        next.san_history
+            .last()
+            .cloned()
+            .expect("make_move records the move it applied")
+    }
+
     /// Play a single SAN move if it is legal in the current position, recording
     /// it in the history. Returns an error if the token matches no legal move.
-    pub fn san_to_move(&mut self, san: &str) -> Result<(), String> {
+    ///
+    /// The applied `Move` is returned so a caller can label it — for example as
+    /// canonical UCI — without searching the legal set a second time.
+    pub fn san_to_move(&mut self, san: &str) -> Result<Move, String> {
         let target: String = normalize_san(san);
         for mv in self.get_legal_moves() {
             if normalize_san(&self.san_body(mv)) == target {
                 self.make_move(mv);
-                return Ok(());
+                return Ok(mv);
             }
         }
         Err(format!("illegal or unrecognized SAN: {san}"))
@@ -118,17 +137,71 @@ impl Board {
 
     /// Replay a movetext string from the standard starting position, the inverse
     /// of `export_san`. Move numbers and a trailing result token are ignored.
+    ///
+    /// This is how the bots rebuild a game from a request, so it is a trust
+    /// boundary: every token that is not a move number or a result must be a
+    /// legal move, or the whole replay fails. It never skips something it did
+    /// not recognize.
     pub fn import_san(movetext: &str) -> Result<Board, String> {
         let mut board = Board::from_fen(START_FEN)?;
-        for token in movetext.split_whitespace() {
-            // Skip move-number tokens ("1.", "1...") and game results
-            if token.contains('.') || matches!(token, "1-0" | "0-1" | "1/2-1/2" | "*") {
-                continue;
-            }
-            board.san_to_move(token)?;
+        for (ply, token) in movetext_moves(movetext).enumerate() {
+            board
+                .san_to_move(token)
+                .map_err(|error| format!("ply {}: {error}", ply + 1))?;
         }
         Ok(board)
     }
+}
+
+/// The SAN move tokens of a movetext string, in order.
+///
+/// Move numbers (`1.`, `12...`, and the run-together `1.e4` form) and result
+/// tokens are dropped; everything else is yielded for the caller to validate
+/// against the position. Nothing is skipped merely for looking unfamiliar — a
+/// token this function does not recognize as bookkeeping is handed on as a move,
+/// where an illegal or malformed one becomes a loud error rather than a move
+/// silently missing from the replayed game.
+///
+/// PGN comments, variations, and NAGs are not accepted. `export_san` does not
+/// produce them, and quietly ignoring them here would mean replaying a
+/// different game from the one that was sent.
+pub fn movetext_moves(movetext: &str) -> impl Iterator<Item = &str> {
+    movetext.split_whitespace().filter_map(|token| {
+        let san: &str = strip_move_number(token);
+        if san.is_empty() || is_result(san) {
+            None
+        } else {
+            Some(san)
+        }
+    })
+}
+
+/// Remove a leading move number from a token, if it has one.
+///
+/// `"1."` -> `""`, `"1...."` -> `""`, `"1.e4"` -> `"e4"`, `"e4"` -> `"e4"`.
+///
+/// The digits must be followed by a dot. That check is what keeps `"0-0"` and
+/// `"1-0"` intact: both start with a digit, and treating either as a move number
+/// would silently swallow a castling move or a game result.
+fn strip_move_number(token: &str) -> &str {
+    let digits_end: usize = token
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(token.len());
+    if digits_end == 0 {
+        return token;
+    }
+
+    let rest: &str = &token[digits_end..];
+    if !rest.starts_with('.') {
+        return token;
+    }
+
+    rest.trim_start_matches('.')
+}
+
+/// Whether a token is a PGN game result rather than a move.
+fn is_result(token: &str) -> bool {
+    matches!(token, "1-0" | "0-1" | "1/2-1/2" | "*")
 }
 
 // Helpers
@@ -366,12 +439,109 @@ mod tests {
     }
 
     #[test]
+    fn san_for_labels_a_move_without_disturbing_the_board() {
+        // White rook to e7 checks the black king on e8.
+        let board = Board::from_fen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")
+            .expect("FEN should parse");
+        let before = board.clone();
+
+        let check = Move {
+            piece: Piece { color: Color::White, kind: PieceKind::Rook },
+            start_square: Square::new(4, 1),
+            end_square: Square::new(4, 6),
+            promotion: None,
+        };
+
+        assert_eq!(board.san_for(check), "Re7+");
+        assert_eq!(board, before, "labelling must not mutate the position");
+    }
+
+    #[test]
+    fn san_to_move_returns_the_move_it_applied() {
+        let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let mut board = Board::from_fen(start).expect("start FEN should parse");
+
+        let played = board.san_to_move("e4").expect("e4 is legal");
+        assert_eq!(played.start_square, Square::new(4, 1));
+        assert_eq!(played.end_square, Square::new(4, 3));
+        assert_eq!(played.piece.kind, PieceKind::Pawn);
+    }
+
+    #[test]
     fn import_export_round_trip() {
         let movetext = "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6";
         let board = Board::import_san(movetext).expect("movetext should replay");
         assert_eq!(board.export_san(), movetext);
 
-        // A bad move in the middle surfaces an error
-        assert!(Board::import_san("1. e4 e9").is_err());
+        // A bad move in the middle surfaces an error naming the ply
+        let error = Board::import_san("1. e4 e9").unwrap_err();
+        assert!(error.contains("ply 2"), "unexpected error: {error}");
+    }
+
+    #[test]
+    fn an_empty_movetext_is_the_starting_position() {
+        // A game that has not started is a legitimate request, not an error.
+        let board = Board::import_san("").expect("empty movetext should replay");
+        assert_eq!(
+            board.to_fen(),
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        );
+        assert!(board.san_history.is_empty());
+    }
+
+    #[test]
+    fn move_numbers_and_results_are_dropped() {
+        let moves: Vec<&str> = movetext_moves("1. e4 e5 2. Nf3 Nc6 1/2-1/2").collect();
+        assert_eq!(moves, vec!["e4", "e5", "Nf3", "Nc6"]);
+
+        // Run-together numbering, as many PGN exporters emit it.
+        let moves: Vec<&str> = movetext_moves("1.e4 e5 2.Nf3").collect();
+        assert_eq!(moves, vec!["e4", "e5", "Nf3"]);
+
+        // Black-to-move continuation numbering.
+        let moves: Vec<&str> = movetext_moves("1... e5 2. Nf3").collect();
+        assert_eq!(moves, vec!["e5", "Nf3"]);
+
+        for result in ["1-0", "0-1", "1/2-1/2", "*"] {
+            assert_eq!(movetext_moves(result).count(), 0, "{result} is not a move");
+        }
+    }
+
+    #[test]
+    fn castling_written_with_zeros_survives_tokenizing() {
+        // "0-0" starts with a digit and contains a dash, which is exactly the
+        // shape of a result token. Confusing the two would silently drop a
+        // castling move from a replayed game.
+        let moves: Vec<&str> = movetext_moves("4. 0-0 0-0-0").collect();
+        assert_eq!(moves, vec!["0-0", "0-0-0"]);
+
+        let board = Board::import_san(
+            "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. 0-0",
+        )
+        .expect("zero-written castling should replay");
+        assert_eq!(board.san_history.last().unwrap(), "O-O");
+    }
+
+    #[test]
+    fn an_unrecognized_token_is_an_error_not_a_silent_skip() {
+        // The dangerous failure is a token that is quietly dropped: the replay
+        // then succeeds and produces a different game from the one sent.
+        assert!(Board::import_san("1. e4 {a comment} e5").is_err());
+        assert!(Board::import_san("1. e4 $1 e5").is_err());
+        assert!(Board::import_san("1. e4 zz").is_err());
+    }
+
+    #[test]
+    fn a_full_game_with_special_moves_round_trips() {
+        // Castling, an en passant capture, and an underpromotion in one game.
+        let movetext = "1. e4 d5 2. exd5 c6 3. dxc6 Nf6 4. cxb7 a6 5. bxa8=N";
+        let board = Board::import_san(movetext).expect("movetext should replay");
+
+        assert_eq!(board.export_san(), movetext);
+        assert_eq!(
+            board.piece_at(Square::new(0, 7)),
+            Some(Piece { color: Color::White, kind: PieceKind::Knight }),
+            "the pawn should have underpromoted on a8"
+        );
     }
 }
