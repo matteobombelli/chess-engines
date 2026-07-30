@@ -1,0 +1,12 @@
+# Local development proxy.
+#
+# The app calls the bot at its deployed path (`/projects/chessengines/api/…`) so
+# the same build works behind the production reverse proxy. `trunk serve` does
+# not know about that path, so it forwards it to the crate you run in the other
+# terminal:
+#
+#   cargo run -p random   # 127.0.0.1:3000
+
+[[proxy]]
+rewrite = "/projects/chessengines/api/"
+backend = "http://127.0.0.1:3000/"
