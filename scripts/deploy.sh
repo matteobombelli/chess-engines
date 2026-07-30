@@ -57,7 +57,7 @@ echo "Verifying live page and API..."
 curl --fail --silent --show-error "$LIVE_URL" >/dev/null
 curl --fail --silent --show-error \
     -H "content-type: application/json" \
-    --data '{"fen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1","san":"e4"}' \
+    --data '{"san":"1. e4 e5 2. Nf3"}' \
     "${LIVE_URL%/}/api/move" >/dev/null
 
 echo "Deployment complete: $LIVE_URL"
