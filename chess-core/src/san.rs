@@ -1,5 +1,5 @@
 use crate::board::*;
-use crate::fen::{ file_letter, str_from_square };
+use crate::fen::{file_letter, str_from_square};
 use crate::legal_moves::Move;
 
 /// The standard starting position, used as the base for `import_san`
@@ -15,14 +15,18 @@ impl Board {
 
         // Castling: the king steps two files off its home square
         if kind == PieceKind::King && from.file() == 4 {
-            if to.file() == 6 { return "O-O".to_string(); }
-            if to.file() == 2 { return "O-O-O".to_string(); }
+            if to.file() == 6 {
+                return "O-O".to_string();
+            }
+            if to.file() == 2 {
+                return "O-O-O".to_string();
+            }
         }
 
         // A capture is a move onto an occupied square, or a pawn onto the
         // en-passant target
-        let is_capture: bool = self.piece_at(to).is_some()
-            || (kind == PieceKind::Pawn && Some(to) == self.en_passant);
+        let is_capture: bool =
+            self.piece_at(to).is_some() || (kind == PieceKind::Pawn && Some(to) == self.en_passant);
 
         let mut san = String::new();
 
@@ -44,7 +48,9 @@ impl Board {
         } else {
             san.push_str(kind_letter(kind));
             san.push_str(&self.disambiguation(mv));
-            if is_capture { san.push('x'); }
+            if is_capture {
+                san.push('x');
+            }
             san.push_str(&str_from_square(to));
         }
 
@@ -93,7 +99,9 @@ impl Board {
         let mut out = String::new();
         for (i, san) in self.san_history.iter().enumerate() {
             if i % 2 == 0 {
-                if !out.is_empty() { out.push(' '); }
+                if !out.is_empty() {
+                    out.push(' ');
+                }
                 out.push_str(&format!("{}. ", i / 2 + 1));
             } else {
                 out.push(' ');
@@ -220,8 +228,7 @@ fn kind_letter(kind: PieceKind) -> &'static str {
 /// Normalize a SAN token for comparison: drop check/mate/annotation suffixes and
 /// accept zeros for castling (e.g. "0-0")
 fn normalize_san(san: &str) -> String {
-    san.trim_end_matches(|c| matches!(c, '+' | '#' | '!' | '?'))
-        .replace('0', "O")
+    san.trim_end_matches(['+', '#', '!', '?']).replace('0', "O")
 }
 
 #[cfg(test)]
@@ -234,7 +241,10 @@ mod tests {
     }
 
     fn pawn(color: Color) -> Piece {
-        Piece { color, kind: PieceKind::Pawn }
+        Piece {
+            color,
+            kind: PieceKind::Pawn,
+        }
     }
 
     #[test]
@@ -249,7 +259,10 @@ mod tests {
         assert_eq!(body(start, e4), "e4");
 
         let nf3 = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(6, 0),
             end_square: Square::new(5, 2),
             promotion: None,
@@ -262,7 +275,10 @@ mod tests {
         // White bishop on c4 takes on f7
         let fen = "rnbqk1nr/pppp1ppp/8/2b1p3/2B1P3/8/PPPP1PPP/RNBQK1NR w KQkq - 0 1";
         let bxf7 = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Bishop },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Bishop,
+            },
             start_square: Square::new(2, 3),
             end_square: Square::new(5, 6),
             promotion: None,
@@ -285,7 +301,10 @@ mod tests {
         // Two knights on the same rank (c3, e3) both reach d5 -> file
         let fen = "4k3/8/8/8/8/2N1N3/8/4K3 w - - 0 1";
         let ncd5 = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(2, 2),
             end_square: Square::new(3, 4),
             promotion: None,
@@ -295,7 +314,10 @@ mod tests {
         // Two knights on the same file (c3, c5) both reach e4 -> rank
         let fen = "4k3/8/8/2N5/8/2N5/8/4K3 w - - 0 1";
         let n3e4 = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(2, 2),
             end_square: Square::new(4, 3),
             promotion: None,
@@ -305,7 +327,10 @@ mod tests {
         // Three knights (b5 shares file with b3; f3 shares rank) all reach d4 -> both
         let fen = "4k3/8/8/1N6/8/1N3N2/8/4K3 w - - 0 1";
         let nb3d4 = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(1, 2),
             end_square: Square::new(3, 3),
             promotion: None,
@@ -316,7 +341,10 @@ mod tests {
     #[test]
     fn castling_both_sides() {
         let fen = "rnbqk2r/pppppppp/8/8/8/8/PPPPPPPP/RNBQK2R w KQkq - 0 1";
-        let king = Piece { color: Color::White, kind: PieceKind::King };
+        let king = Piece {
+            color: Color::White,
+            kind: PieceKind::King,
+        };
 
         let short = Move {
             piece: king,
@@ -347,7 +375,10 @@ mod tests {
         };
         assert_eq!(body(fen, promote), "a8=Q");
 
-        let under = Move { promotion: Some(PieceKind::Knight), ..promote };
+        let under = Move {
+            promotion: Some(PieceKind::Knight),
+            ..promote
+        };
         assert_eq!(body(fen, under), "a8=N");
 
         // Pawn on a7 captures a knight on b8, promoting to a knight
@@ -364,10 +395,13 @@ mod tests {
     #[test]
     fn make_move_records_check_suffix() {
         // White rook lifts to e7, checking the black king on e8 (not mate)
-        let mut board = Board::from_fen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let mut board =
+            Board::from_fen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1").expect("FEN should parse");
         board.make_move(Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Rook },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Rook,
+            },
             start_square: Square::new(4, 1),
             end_square: Square::new(4, 6),
             promotion: None,
@@ -378,10 +412,14 @@ mod tests {
     #[test]
     fn make_move_records_checkmate_suffix() {
         // Fool's mate: Black plays Qd8-h4#
-        let mut board = Board::from_fen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2")
-            .expect("FEN should parse");
+        let mut board =
+            Board::from_fen("rnbqkbnr/pppp1ppp/8/4p3/6P1/5P2/PPPPP2P/RNBQKBNR b KQkq - 0 2")
+                .expect("FEN should parse");
         board.make_move(Move {
-            piece: Piece { color: Color::Black, kind: PieceKind::Queen },
+            piece: Piece {
+                color: Color::Black,
+                kind: PieceKind::Queen,
+            },
             start_square: Square::new(3, 7),
             end_square: Square::new(7, 3),
             promotion: None,
@@ -407,13 +445,19 @@ mod tests {
             promotion: None,
         });
         board.make_move(Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(6, 0),
             end_square: Square::new(5, 2),
             promotion: None,
         });
         board.make_move(Move {
-            piece: Piece { color: Color::Black, kind: PieceKind::Knight },
+            piece: Piece {
+                color: Color::Black,
+                kind: PieceKind::Knight,
+            },
             start_square: Square::new(1, 7),
             end_square: Square::new(2, 5),
             promotion: None,
@@ -441,12 +485,14 @@ mod tests {
     #[test]
     fn san_for_labels_a_move_without_disturbing_the_board() {
         // White rook to e7 checks the black king on e8.
-        let board = Board::from_fen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1").expect("FEN should parse");
         let before = board.clone();
 
         let check = Move {
-            piece: Piece { color: Color::White, kind: PieceKind::Rook },
+            piece: Piece {
+                color: Color::White,
+                kind: PieceKind::Rook,
+            },
             start_square: Square::new(4, 1),
             end_square: Square::new(4, 6),
             promotion: None,
@@ -515,10 +561,8 @@ mod tests {
         let moves: Vec<&str> = movetext_moves("4. 0-0 0-0-0").collect();
         assert_eq!(moves, vec!["0-0", "0-0-0"]);
 
-        let board = Board::import_san(
-            "1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. 0-0",
-        )
-        .expect("zero-written castling should replay");
+        let board = Board::import_san("1. e4 e5 2. Nf3 Nc6 3. Bc4 Bc5 4. 0-0")
+            .expect("zero-written castling should replay");
         assert_eq!(board.san_history.last().unwrap(), "O-O");
     }
 
@@ -540,7 +584,10 @@ mod tests {
         assert_eq!(board.export_san(), movetext);
         assert_eq!(
             board.piece_at(Square::new(0, 7)),
-            Some(Piece { color: Color::White, kind: PieceKind::Knight }),
+            Some(Piece {
+                color: Color::White,
+                kind: PieceKind::Knight
+            }),
             "the pawn should have underpromoted on a8"
         );
     }

@@ -66,7 +66,9 @@ mod tests {
     const UNDERPROMOTION: &str = "1. e4 d5 2. exd5 c6 3. dxc6 Nf6 4. cxb7 a6 5. bxa8=N";
 
     fn request(movetext: &str) -> BotRequest {
-        BotRequest { san: Some(movetext.to_string()) }
+        BotRequest {
+            san: Some(movetext.to_string()),
+        }
     }
 
     #[test]
@@ -86,8 +88,7 @@ mod tests {
         // An absent or empty game means nothing has been played yet, so the bot
         // moves first. This is how the frontend opens when the player is Black.
         for movetext in [None, Some(String::new())] {
-            let response =
-                respond(BotRequest { san: movetext }).expect("bot should open the game");
+            let response = respond(BotRequest { san: movetext }).expect("bot should open the game");
 
             let mut expected = Board::from_fen(START).unwrap();
             expected

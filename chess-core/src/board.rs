@@ -15,7 +15,6 @@ impl Color {
     }
 }
 
-
 /// The kind of a piece, ignoring its color
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PieceKind {
@@ -53,7 +52,7 @@ impl Square {
     pub fn rank(self) -> u8 {
         self.0 / 8
     }
-    
+
     /// The 0..=63 index
     pub fn index(self) -> usize {
         self.0 as usize
@@ -76,7 +75,7 @@ pub struct Board {
     pub squares: [Option<Piece>; 64],
     pub side_to_move: Color,
     pub castling: CastlingRights,
-    
+
     /// The square a pawn may be captured on by en passant
     pub en_passant: Option<Square>,
     pub halfmove_clock: u32,
@@ -137,8 +136,11 @@ mod tests {
     fn place_and_read() {
         let mut board = Board::empty();
         let e4 = Square::new(4, 3);
-        let pawn = Piece { color: Color::White, kind: PieceKind::Pawn };
-        
+        let pawn = Piece {
+            color: Color::White,
+            kind: PieceKind::Pawn,
+        };
+
         board.set_piece(e4, Some(pawn));
 
         assert_eq!(board.piece_at(e4), Some(pawn));

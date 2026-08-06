@@ -73,7 +73,10 @@ impl Board {
                 self.set_piece(to, Some(mv.piece));
 
                 // Castling: the king steps two files, so the rook jumps across it
-                let rook: Piece = Piece { color, kind: PieceKind::Rook };
+                let rook: Piece = Piece {
+                    color,
+                    kind: PieceKind::Rook,
+                };
                 if from.file() == 4 && to.file() == 6 {
                     // Kingside: h-rook to f
                     self.set_piece(Square::new(7, from.rank()), None);
@@ -102,10 +105,18 @@ impl Board {
             }
         }
         for sq in [from, to] {
-            if sq == Square::new(0, 0) { self.castling.white_queenside = false; }
-            if sq == Square::new(7, 0) { self.castling.white_kingside = false; }
-            if sq == Square::new(0, 7) { self.castling.black_queenside = false; }
-            if sq == Square::new(7, 7) { self.castling.black_kingside = false; }
+            if sq == Square::new(0, 0) {
+                self.castling.white_queenside = false;
+            }
+            if sq == Square::new(7, 0) {
+                self.castling.white_kingside = false;
+            }
+            if sq == Square::new(0, 7) {
+                self.castling.black_queenside = false;
+            }
+            if sq == Square::new(7, 7) {
+                self.castling.black_kingside = false;
+            }
         }
 
         // En-passant target: a pawn double-push leaves the square it skipped over
@@ -207,10 +218,7 @@ impl Board {
         } else {
             "-"
         };
-        format!(
-            "{} {} {} {}",
-            fields[0], fields[1], fields[2], en_passant
-        )
+        format!("{} {} {} {}", fields[0], fields[1], fields[2], en_passant)
     }
 
     fn has_legal_en_passant_capture(&self) -> bool {
@@ -237,8 +245,12 @@ impl Board {
                 };
                 match piece.kind {
                     PieceKind::Pawn => self.gen_pawn_moves(from, piece, &mut moves),
-                    PieceKind::Knight => self.gen_step_moves(from, piece, &KNIGHT_OFFSETS, &mut moves),
-                    PieceKind::Bishop => self.gen_slide_moves(from, piece, &BISHOP_DIRS, &mut moves),
+                    PieceKind::Knight => {
+                        self.gen_step_moves(from, piece, &KNIGHT_OFFSETS, &mut moves)
+                    }
+                    PieceKind::Bishop => {
+                        self.gen_slide_moves(from, piece, &BISHOP_DIRS, &mut moves)
+                    }
                     PieceKind::Rook => self.gen_slide_moves(from, piece, &ROOK_DIRS, &mut moves),
                     PieceKind::Queen => self.gen_slide_moves(from, piece, &QUEEN_DIRS, &mut moves),
                     PieceKind::King => {
@@ -252,20 +264,37 @@ impl Board {
     }
 
     /// Generate single-step moves (knight, king) from a list of offsets
-    fn gen_step_moves(&self, from: Square, piece: Piece, offsets: &[(i8, i8)], moves: &mut Vec<Move>) {
+    fn gen_step_moves(
+        &self,
+        from: Square,
+        piece: Piece,
+        offsets: &[(i8, i8)],
+        moves: &mut Vec<Move>,
+    ) {
         for &(df, dr) in offsets {
             if let Some(to) = offset_square(from, df, dr) {
                 // We may land on an empty square or capture an enemy piece
                 match self.piece_at(to) {
                     Some(target) if target.color == piece.color => continue,
-                    _ => moves.push(Move { piece, start_square: from, end_square: to, promotion: None }),
+                    _ => moves.push(Move {
+                        piece,
+                        start_square: from,
+                        end_square: to,
+                        promotion: None,
+                    }),
                 }
             }
         }
     }
 
     /// Generate sliding moves (bishop, rook, queen) along a list of directions
-    fn gen_slide_moves(&self, from: Square, piece: Piece, dirs: &[(i8, i8)], moves: &mut Vec<Move>) {
+    fn gen_slide_moves(
+        &self,
+        from: Square,
+        piece: Piece,
+        dirs: &[(i8, i8)],
+        moves: &mut Vec<Move>,
+    ) {
         for &(df, dr) in dirs {
             let mut to: Option<Square> = offset_square(from, df, dr);
             while let Some(sq) = to {
@@ -273,12 +302,22 @@ impl Board {
                     Some(target) => {
                         // Stop at the first piece, capturing it if it's an enemy
                         if target.color != piece.color {
-                            moves.push(Move { piece, start_square: from, end_square: sq, promotion: None });
+                            moves.push(Move {
+                                piece,
+                                start_square: from,
+                                end_square: sq,
+                                promotion: None,
+                            });
                         }
                         break;
                     }
                     None => {
-                        moves.push(Move { piece, start_square: from, end_square: sq, promotion: None });
+                        moves.push(Move {
+                            piece,
+                            start_square: from,
+                            end_square: sq,
+                            promotion: None,
+                        });
                         to = offset_square(sq, df, dr);
                     }
                 }
@@ -353,7 +392,12 @@ impl Board {
             && !self.is_attacked(Square::new(5, rank), enemy)
             && !self.is_attacked(Square::new(6, rank), enemy)
         {
-            moves.push(Move { piece, start_square: from, end_square: Square::new(6, rank), promotion: None });
+            moves.push(Move {
+                piece,
+                start_square: from,
+                end_square: Square::new(6, rank),
+                promotion: None,
+            });
         }
 
         // Queenside: b, c, d empty, and the king never crosses an attacked square
@@ -364,7 +408,12 @@ impl Board {
             && !self.is_attacked(Square::new(3, rank), enemy)
             && !self.is_attacked(Square::new(2, rank), enemy)
         {
-            moves.push(Move { piece, start_square: from, end_square: Square::new(2, rank), promotion: None });
+            moves.push(Move {
+                piece,
+                start_square: from,
+                end_square: Square::new(2, rank),
+                promotion: None,
+            });
         }
     }
 
@@ -373,7 +422,12 @@ impl Board {
         for rank in 0..8 {
             for file in 0..8 {
                 let sq: Square = Square::new(file, rank);
-                if self.piece_at(sq) == Some(Piece { color, kind: PieceKind::King }) {
+                if self.piece_at(sq)
+                    == Some(Piece {
+                        color,
+                        kind: PieceKind::King,
+                    })
+                {
                     return Some(sq);
                 }
             }
@@ -391,7 +445,12 @@ impl Board {
         };
         for df in [-1, 1] {
             if let Some(p) = offset_square(sq, df, -pawn_dir) {
-                if self.piece_at(p) == Some(Piece { color: by, kind: PieceKind::Pawn }) {
+                if self.piece_at(p)
+                    == Some(Piece {
+                        color: by,
+                        kind: PieceKind::Pawn,
+                    })
+                {
                     return true;
                 }
             }
@@ -400,7 +459,12 @@ impl Board {
         // Knights
         for &(df, dr) in &KNIGHT_OFFSETS {
             if let Some(p) = offset_square(sq, df, dr) {
-                if self.piece_at(p) == Some(Piece { color: by, kind: PieceKind::Knight }) {
+                if self.piece_at(p)
+                    == Some(Piece {
+                        color: by,
+                        kind: PieceKind::Knight,
+                    })
+                {
                     return true;
                 }
             }
@@ -409,7 +473,12 @@ impl Board {
         // Enemy king on an adjacent square
         for &(df, dr) in &KING_OFFSETS {
             if let Some(p) = offset_square(sq, df, dr) {
-                if self.piece_at(p) == Some(Piece { color: by, kind: PieceKind::King }) {
+                if self.piece_at(p)
+                    == Some(Piece {
+                        color: by,
+                        kind: PieceKind::King,
+                    })
+                {
                     return true;
                 }
             }
@@ -457,24 +526,51 @@ fn offset_square(sq: Square, df: i8, dr: i8) -> Option<Square> {
 /// Push a pawn move, expanding it into all four promotions on the back rank
 fn push_pawn_move(piece: Piece, from: Square, to: Square, moves: &mut Vec<Move>) {
     if to.rank() == 0 || to.rank() == 7 {
-        for kind in [PieceKind::Queen, PieceKind::Rook, PieceKind::Bishop, PieceKind::Knight] {
-            moves.push(Move { piece, start_square: from, end_square: to, promotion: Some(kind) });
+        for kind in [
+            PieceKind::Queen,
+            PieceKind::Rook,
+            PieceKind::Bishop,
+            PieceKind::Knight,
+        ] {
+            moves.push(Move {
+                piece,
+                start_square: from,
+                end_square: to,
+                promotion: Some(kind),
+            });
         }
     } else {
-        moves.push(Move { piece, start_square: from, end_square: to, promotion: None });
+        moves.push(Move {
+            piece,
+            start_square: from,
+            end_square: to,
+            promotion: None,
+        });
     }
 }
 
 /// Knight jumps as (file, rank) offsets
 const KNIGHT_OFFSETS: [(i8, i8); 8] = [
-    (1, 2), (2, 1), (2, -1), (1, -2),
-    (-1, -2), (-2, -1), (-2, 1), (-1, 2),
+    (1, 2),
+    (2, 1),
+    (2, -1),
+    (1, -2),
+    (-1, -2),
+    (-2, -1),
+    (-2, 1),
+    (-1, 2),
 ];
 
 /// King steps as (file, rank) offsets
 const KING_OFFSETS: [(i8, i8); 8] = [
-    (1, 0), (1, 1), (0, 1), (-1, 1),
-    (-1, 0), (-1, -1), (0, -1), (1, -1),
+    (1, 0),
+    (1, 1),
+    (0, 1),
+    (-1, 1),
+    (-1, 0),
+    (-1, -1),
+    (0, -1),
+    (1, -1),
 ];
 
 /// Bishop directions as (file, rank) offsets
@@ -485,8 +581,14 @@ const ROOK_DIRS: [(i8, i8); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
 /// Queen directions as (file, rank) offsets
 const QUEEN_DIRS: [(i8, i8); 8] = [
-    (1, 0), (-1, 0), (0, 1), (0, -1),
-    (1, 1), (1, -1), (-1, 1), (-1, -1),
+    (1, 0),
+    (-1, 0),
+    (0, 1),
+    (0, -1),
+    (1, 1),
+    (1, -1),
+    (-1, 1),
+    (-1, -1),
 ];
 
 #[cfg(test)]
@@ -523,10 +625,18 @@ mod tests {
         let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         let mut board = Board::from_fen(start).expect("start FEN should parse");
 
-        let pawn = Piece { color: Color::White, kind: PieceKind::Pawn };
+        let pawn = Piece {
+            color: Color::White,
+            kind: PieceKind::Pawn,
+        };
         let e2 = Square::new(4, 1);
         let e4 = Square::new(4, 3);
-        board.make_move(Move { piece: pawn, start_square: e2, end_square: e4, promotion: None });
+        board.make_move(Move {
+            piece: pawn,
+            start_square: e2,
+            end_square: e4,
+            promotion: None,
+        });
 
         assert_eq!(board.piece_at(e2), None);
         assert_eq!(board.piece_at(e4), Some(pawn));
@@ -539,8 +649,7 @@ mod tests {
     fn king_must_escape_check() {
         // Black king on h8 is checked by a white rook on h1; it can only step to
         // g7 or g8 (h7 stays on the attacked file)
-        let board = Board::from_fen("7k/8/8/8/8/8/8/4K2R b K - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("7k/8/8/8/8/8/8/4K2R b K - 0 1").expect("FEN should parse");
 
         let moves = board.get_legal_moves();
         assert_eq!(moves.len(), 2);
@@ -550,8 +659,7 @@ mod tests {
     fn pawn_promotes_to_all_four_pieces() {
         // White pawn on a7 can promote on a8; that single push must expand into
         // queen, rook, bishop, and knight
-        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
         let promotions = board
             .get_legal_moves()
@@ -563,10 +671,13 @@ mod tests {
 
     #[test]
     fn under_promotion_to_knight() {
-        let mut board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let mut board =
+            Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
-        let pawn = Piece { color: Color::White, kind: PieceKind::Pawn };
+        let pawn = Piece {
+            color: Color::White,
+            kind: PieceKind::Pawn,
+        };
         let a7 = Square::new(0, 6);
         let a8 = Square::new(0, 7);
         board.make_move(Move {
@@ -576,14 +687,21 @@ mod tests {
             promotion: Some(PieceKind::Knight),
         });
 
-        assert_eq!(board.piece_at(a8), Some(Piece { color: Color::White, kind: PieceKind::Knight }));
+        assert_eq!(
+            board.piece_at(a8),
+            Some(Piece {
+                color: Color::White,
+                kind: PieceKind::Knight
+            })
+        );
     }
 
     #[test]
     fn detects_checkmate() {
         // Fool's mate: White is mated after 1. f3 e5 2. g4 Qh4#
-        let board = Board::from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
-            .expect("FEN should parse");
+        let board =
+            Board::from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
+                .expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Checkmate);
     }
@@ -591,8 +709,7 @@ mod tests {
     #[test]
     fn detects_stalemate() {
         // Black king on h8 has no legal move but is not in check
-        let board = Board::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1").expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Stalemate);
     }
@@ -602,9 +719,7 @@ mod tests {
         let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         let mut board = Board::from_fen(start).expect("start FEN should parse");
 
-        for san in [
-            "Nf3", "Nf6", "Ng1", "Ng8", "Nf3", "Nf6", "Ng1", "Ng8",
-        ] {
+        for san in ["Nf3", "Nf6", "Ng1", "Ng8", "Nf3", "Nf6", "Ng1", "Ng8"] {
             board
                 .san_to_move(san)
                 .expect("repetition move should be legal");
@@ -615,8 +730,8 @@ mod tests {
 
     #[test]
     fn detects_fifty_move_rule_at_one_hundred_halfmoves() {
-        let mut board = Board::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 99 50")
-            .expect("FEN should parse");
+        let mut board =
+            Board::from_fen("4k3/8/8/8/8/8/8/R3K3 w - - 99 50").expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Ongoing);
         board.san_to_move("Rb1").expect("rook move should be legal");
@@ -626,24 +741,23 @@ mod tests {
 
     #[test]
     fn checkmate_takes_precedence_over_fifty_move_rule() {
-        let board = Board::from_fen(
-            "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 100 51",
-        )
-        .expect("FEN should parse");
+        let board =
+            Board::from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 100 51")
+                .expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Checkmate);
     }
 
     #[test]
     fn repetition_key_ignores_unusable_en_passant_target() {
-        let without_target = Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
-        let unusable_target = Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1")
-            .expect("FEN should parse");
-        let capturable_target = Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1")
-            .expect("FEN should parse");
-        let same_without_target = Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let without_target =
+            Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
+        let unusable_target =
+            Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1").expect("FEN should parse");
+        let capturable_target =
+            Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1").expect("FEN should parse");
+        let same_without_target =
+            Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
         assert_eq!(
             without_target.current_position_key(),

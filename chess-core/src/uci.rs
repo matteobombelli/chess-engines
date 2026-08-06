@@ -111,13 +111,14 @@ fn is_uci_shaped(uci: &str) -> bool {
         return false;
     }
 
-    let square_ok = |file: char, rank: char| {
-        ('a'..='h').contains(&file) && ('1'..='8').contains(&rank)
-    };
+    let square_ok =
+        |file: char, rank: char| ('a'..='h').contains(&file) && ('1'..='8').contains(&rank);
 
     square_ok(chars[0], chars[1])
         && square_ok(chars[2], chars[3])
-        && chars.get(4).is_none_or(|c| matches!(c, 'q' | 'r' | 'b' | 'n'))
+        && chars
+            .get(4)
+            .is_none_or(|c| matches!(c, 'q' | 'r' | 'b' | 'n'))
 }
 
 #[cfg(test)]
@@ -130,11 +131,15 @@ mod tests {
     fn pawn_push_and_knight_move_round_trip() {
         let board = Board::from_fen(START).expect("start FEN should parse");
 
-        let e4 = board.move_from_uci("e2e4").expect("e2e4 is legal at the start");
+        let e4 = board
+            .move_from_uci("e2e4")
+            .expect("e2e4 is legal at the start");
         assert_eq!(e4.to_uci(), "e2e4");
         assert_eq!(board.san_body(e4), "e4");
 
-        let nf3 = board.move_from_uci("g1f3").expect("g1f3 is legal at the start");
+        let nf3 = board
+            .move_from_uci("g1f3")
+            .expect("g1f3 is legal at the start");
         assert_eq!(nf3.to_uci(), "g1f3");
         assert_eq!(board.san_body(nf3), "Nf3");
     }
@@ -144,8 +149,12 @@ mod tests {
         let board = Board::from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1")
             .expect("FEN should parse");
 
-        let short = board.move_from_uci("e1g1").expect("kingside castling is legal");
-        let long = board.move_from_uci("e1c1").expect("queenside castling is legal");
+        let short = board
+            .move_from_uci("e1g1")
+            .expect("kingside castling is legal");
+        let long = board
+            .move_from_uci("e1c1")
+            .expect("queenside castling is legal");
 
         assert_eq!(board.san_body(short), "O-O");
         assert_eq!(board.san_body(long), "O-O-O");
@@ -157,10 +166,18 @@ mod tests {
     fn castling_moves_the_rook_when_applied_from_uci() {
         let mut board = Board::from_fen("r3k2r/pppppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1")
             .expect("FEN should parse");
-        board.uci_to_move("e1g1").expect("kingside castling is legal");
+        board
+            .uci_to_move("e1g1")
+            .expect("kingside castling is legal");
 
-        let rook = Piece { color: Color::White, kind: PieceKind::Rook };
-        let king = Piece { color: Color::White, kind: PieceKind::King };
+        let rook = Piece {
+            color: Color::White,
+            kind: PieceKind::Rook,
+        };
+        let king = Piece {
+            color: Color::White,
+            kind: PieceKind::King,
+        };
         assert_eq!(board.piece_at(Square::new(6, 0)), Some(king));
         assert_eq!(board.piece_at(Square::new(5, 0)), Some(rook));
         assert_eq!(board.piece_at(Square::new(7, 0)), None);
@@ -169,12 +186,13 @@ mod tests {
     #[test]
     fn en_passant_capture_round_trips() {
         // Black has just played d7d5; White's e5 pawn may take on d6.
-        let mut board = Board::from_fen(
-            "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
-        )
-        .expect("FEN should parse");
+        let mut board =
+            Board::from_fen("rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3")
+                .expect("FEN should parse");
 
-        let capture = board.move_from_uci("e5d6").expect("en passant is legal here");
+        let capture = board
+            .move_from_uci("e5d6")
+            .expect("en passant is legal here");
         assert_eq!(capture.to_uci(), "e5d6");
 
         board.uci_to_move("e5d6").expect("en passant is legal here");
@@ -185,8 +203,7 @@ mod tests {
 
     #[test]
     fn every_promotion_choice_has_a_distinct_uci() {
-        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
         let promotions: Vec<String> = board
             .legal_uci_moves()
@@ -196,7 +213,9 @@ mod tests {
 
         assert_eq!(promotions, vec!["a7a8q", "a7a8r", "a7a8b", "a7a8n"]);
 
-        let knight = board.move_from_uci("a7a8n").expect("underpromotion is legal");
+        let knight = board
+            .move_from_uci("a7a8n")
+            .expect("underpromotion is legal");
         assert_eq!(knight.promotion, Some(PieceKind::Knight));
         assert_eq!(board.san_body(knight), "a8=N");
     }
@@ -205,8 +224,7 @@ mod tests {
     fn a_promotion_without_its_letter_is_not_a_legal_candidate() {
         // "a7a8" is UCI-shaped but ambiguous: the move generator only ever emits
         // the four explicit promotions, so the bare string must not resolve.
-        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1")
-            .expect("FEN should parse");
+        let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
         let error = board.move_from_uci("a7a8").unwrap_err();
         assert!(error.contains("illegal"), "unexpected error: {error}");
@@ -216,10 +234,25 @@ mod tests {
     fn malformed_and_illegal_strings_are_rejected_differently() {
         let board = Board::from_fen(START).expect("start FEN should parse");
 
-        assert!(board.move_from_uci("e2e9").unwrap_err().contains("malformed"));
+        assert!(
+            board
+                .move_from_uci("e2e9")
+                .unwrap_err()
+                .contains("malformed")
+        );
         assert!(board.move_from_uci("").unwrap_err().contains("malformed"));
-        assert!(board.move_from_uci("e2e4e4").unwrap_err().contains("malformed"));
-        assert!(board.move_from_uci("e2e4k").unwrap_err().contains("malformed"));
+        assert!(
+            board
+                .move_from_uci("e2e4e4")
+                .unwrap_err()
+                .contains("malformed")
+        );
+        assert!(
+            board
+                .move_from_uci("e2e4k")
+                .unwrap_err()
+                .contains("malformed")
+        );
         // Well formed, but not White's move to make from the start position.
         assert!(board.move_from_uci("e7e5").unwrap_err().contains("illegal"));
     }
@@ -259,7 +292,9 @@ mod tests {
 
         assert_eq!(board.export_san(), "1. e4 e5 2. Nf3 Nc6 3. Bb5 a6");
         assert_eq!(
-            Board::import_san("1. e4 e5 2. Nf3 Nc6 3. Bb5 a6").unwrap().to_fen(),
+            Board::import_san("1. e4 e5 2. Nf3 Nc6 3. Bb5 a6")
+                .unwrap()
+                .to_fen(),
             board.to_fen()
         );
     }

@@ -507,10 +507,7 @@ fn start_bot_turn(
     });
 }
 
-async fn request_bot(
-    movetext: String,
-    mut before_bot: Board,
-) -> Result<(Board, String), String> {
+async fn request_bot(movetext: String, mut before_bot: Board) -> Result<(Board, String), String> {
     let payload = BotRequest { san: movetext };
     let mut gateway_retries = 1;
 
@@ -745,10 +742,9 @@ mod tests {
 
     #[test]
     fn checkmate_winner_respects_the_players_side() {
-        let board = Board::from_fen(
-            "rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3",
-        )
-        .unwrap();
+        let board =
+            Board::from_fen("rnb1kbnr/pppp1ppp/8/4p3/6Pq/5P2/PPPPP2P/RNBQKBNR w KQkq - 1 3")
+                .unwrap();
 
         assert_eq!(
             status_text(&board, false, Color::White),

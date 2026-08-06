@@ -1,11 +1,11 @@
 use axum::{
+    Router,
     extract::Json,
-    http::{header, HeaderValue, StatusCode},
+    http::{HeaderValue, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{options, post},
-    Router,
 };
-use random::{respond, BotRequest};
+use random::{BotRequest, respond};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -49,8 +49,8 @@ async fn main() {
     let app = Router::new()
         .route("/move", post(move_handler))
         .route("/move", options(preflight));
-    let bind_address = std::env::var("BIND_ADDRESS")
-        .unwrap_or_else(|_| "127.0.0.1:3000".to_string());
+    let bind_address =
+        std::env::var("BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:3000".to_string());
     let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
         .unwrap_or_else(|error| panic!("bind random bot on {bind_address}: {error}"));

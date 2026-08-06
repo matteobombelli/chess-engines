@@ -15,7 +15,7 @@ impl Board {
         if ranks.len() != 8 {
             return Err(format!("expected 8 ranks, got {}", ranks.len()));
         }
-        
+
         // Iterate over ranks 1...8 represented as 0...7 in Board
         for (row, rank_str) in ranks.iter().enumerate() {
             let rank = 7 - row as u8;
@@ -99,13 +99,21 @@ impl Board {
             Color::White => "w",
             Color::Black => "b",
         };
-        
+
         // Field 3: Castling rights
         let mut castling_rights: Vec<&str> = Vec::new();
-        if self.castling.white_kingside { castling_rights.push("K"); }
-        if self.castling.white_queenside { castling_rights.push("Q"); }
-        if self.castling.black_kingside { castling_rights.push("k"); }
-        if self.castling.black_queenside { castling_rights.push("q"); }
+        if self.castling.white_kingside {
+            castling_rights.push("K");
+        }
+        if self.castling.white_queenside {
+            castling_rights.push("Q");
+        }
+        if self.castling.black_kingside {
+            castling_rights.push("k");
+        }
+        if self.castling.black_queenside {
+            castling_rights.push("q");
+        }
         let castling: String = if castling_rights.is_empty() {
             "-".to_string()
         } else {
@@ -126,7 +134,7 @@ impl Board {
         let fullmove_number: String = self.fullmove_number.to_string();
 
         // Construct FEN string
-        format!("{} {} {} {} {} {}", placement, side, castling, en_passant, halfmove_clock, fullmove_number)
+        format!("{placement} {side} {castling} {en_passant} {halfmove_clock} {fullmove_number}")
     }
 }
 
@@ -134,7 +142,7 @@ impl Board {
 /// Turn a FEN piece letter into a piece
 fn piece_from_char(ch: char) -> Result<Piece, String> {
     let color: Color = if ch.is_ascii_uppercase() {
-        Color::White  
+        Color::White
     } else {
         Color::Black
     };
@@ -146,7 +154,11 @@ fn piece_from_char(ch: char) -> Result<Piece, String> {
         'r' => PieceKind::Rook,
         'q' => PieceKind::Queen,
         'k' => PieceKind::King,
-        _ => return Err(format!("expected 'p', 'n', 'b', 'r', 'q', or 'k', got {}", ch)),
+        _ => {
+            return Err(format!(
+                "expected 'p', 'n', 'b', 'r', 'q', or 'k', got {ch}"
+            ));
+        }
     };
 
     Ok(Piece { color, kind })
@@ -170,8 +182,8 @@ fn square_from_str(s: &str) -> Result<Square, String> {
         'h' => 7,
         _ => return Err(format!("expected valid file, got {}", chs[0])),
     };
-    let rank:u8 = match chs[1].to_digit(10) {
-        Some (d) if (1..=8).contains(&d) => (d - 1) as u8,
+    let rank: u8 = match chs[1].to_digit(10) {
+        Some(d) if (1..=8).contains(&d) => (d - 1) as u8,
         _ => return Err(format!("expected rank 1-8, got {}", chs[1])),
     };
 
@@ -196,7 +208,7 @@ fn char_from_piece(p: Piece) -> char {
 
 pub(crate) fn str_from_square(sq: Square) -> String {
     let rank: u8 = sq.rank() + 1;
-    format!("{}{}", file_letter(sq.file()), rank.to_string())
+    format!("{}{rank}", file_letter(sq.file()))
 }
 
 /// Turn a 0..=7 file index into its letter a..h
@@ -223,15 +235,21 @@ mod tests {
         let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
         let board = Board::from_fen(start).expect("start FEN should parse");
 
-        let w_rook = Piece { color: Color::White, kind: PieceKind::Rook };
-        let b_king = Piece { color: Color::Black, kind: PieceKind::King };
+        let w_rook = Piece {
+            color: Color::White,
+            kind: PieceKind::Rook,
+        };
+        let b_king = Piece {
+            color: Color::Black,
+            kind: PieceKind::King,
+        };
 
         assert_eq!(board.piece_at(Square::new(0, 0)), Some(w_rook));
         assert_eq!(board.piece_at(Square::new(4, 7)), Some(b_king));
         assert_eq!(board.piece_at(Square::new(4, 3)), None);
 
         assert_eq!(board.side_to_move, Color::White);
-        assert_eq!(board.castling.white_kingside, true);
+        assert!(board.castling.white_kingside);
         assert_eq!(board.halfmove_clock, 0);
     }
 
