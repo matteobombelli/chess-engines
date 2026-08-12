@@ -1,0 +1,15 @@
+[package]
+name = "minimax"
+version = "0.1.0"
+edition = "2024"
+default-run = "minimax"
+
+[dependencies]
+axum = "0.8"
+chess-core = { path = "../chess-core" }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
+
+[[bin]]
+name = "minimax-uci"
+path = "src/bin/uci.rs"

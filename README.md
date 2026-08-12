@@ -34,6 +34,11 @@ Before adding an ML model, run the repository tests:
 cargo test --workspace
 ```
 
+## Minimax
+
+The `minimax` crate has a guided alpha-beta search scaffold in
+`minimax/src/search.rs`. See `minimax/README.md` for the implementation order.
+
 ## Deploy
 
 Deploy the committed `main` working tree to production with:

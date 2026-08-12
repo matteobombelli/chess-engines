@@ -38,6 +38,12 @@ impl Board {
         self.san_history.push(format!("{body}{suffix}"));
     }
 
+    /// Apply a legal move without recording SAN. Used for search positions.
+    pub fn make_search_move(&mut self, mv: Move) {
+        self.apply_move(mv);
+        self.record_current_position();
+    }
+
     /// Apply a move to the Board without recording it
     fn apply_move(&mut self, mv: Move) {
         let color: Color = mv.piece.color;
@@ -746,6 +752,23 @@ mod tests {
                 .expect("FEN should parse");
 
         assert_eq!(board.status(), Status::Checkmate);
+    }
+
+    #[test]
+    fn search_move_skips_san() {
+        let start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+        let board = Board::from_fen(start).expect("start FEN should parse");
+        let mv = board.move_from_uci("e2e4").expect("e2e4 should be legal");
+
+        let mut regular = board.clone();
+        regular.make_move(mv);
+        let mut searched = board;
+        searched.make_search_move(mv);
+
+        assert_eq!(searched.to_fen(), regular.to_fen());
+        assert!(searched.san_history.is_empty());
+        assert_eq!(regular.san_history, ["e4"]);
+        assert_eq!(searched.position_history, regular.position_history);
     }
 
     #[test]

@@ -6,17 +6,18 @@ use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
-const BOT_URL: &str = "/projects/chessengines/api/move";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Model {
     Random,
+    Minimax,
 }
 
 impl Model {
     fn from_value(value: &str) -> Self {
         match value {
             "random" => Self::Random,
+            "minimax" => Self::Minimax,
             _ => Self::Random,
         }
     }
@@ -24,24 +25,27 @@ impl Model {
     fn name(self) -> &'static str {
         match self {
             Self::Random => "Random",
+            Self::Minimax => "Minimax",
         }
     }
 
     fn note(self) -> &'static str {
         match self {
             Self::Random => "Chooses uniformly from every legal move.",
+            Self::Minimax => "Searches moves with alpha-beta pruning.",
+        }
+    }
+
+    fn url(self) -> &'static str {
+        match self {
+            Self::Random => "/projects/chessengines/api/random/move",
+            Self::Minimax => "/projects/chessengines/api/minimax/move",
         }
     }
 }
 
 #[derive(Serialize)]
 /// The whole game as PGN movetext.
-///
-/// One field, one source of truth. The bot replays it to rebuild the position,
-/// so there is no FEN that could disagree with the moves — and the learned
-/// engines get the move history they predict from, which a position cannot
-/// supply, since many move orders reach the same board.
-///
 /// An empty string means the game has not started and the bot moves first.
 struct BotRequest {
     san: String,
@@ -82,6 +86,7 @@ fn App() -> impl IntoView {
             error,
             game_id,
             pending_promotion,
+            selected_model.get_untracked(),
         );
     };
 
@@ -105,6 +110,7 @@ fn App() -> impl IntoView {
             error,
             game_id,
             pending_promotion,
+            selected_model.get_untracked(),
         );
     };
 
@@ -138,6 +144,7 @@ fn App() -> impl IntoView {
             game_id,
             movetext,
             after_player,
+            selected_model.get_untracked(),
         );
     };
 
@@ -347,6 +354,7 @@ fn App() -> impl IntoView {
                             }
                         >
                             <option value="random">"Random"</option>
+                            <option value="minimax">"Minimax"</option>
                         </select>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
@@ -438,6 +446,50 @@ fn App() -> impl IntoView {
                         </div>
                     </section>
                 },
+                Model::Minimax => view! {
+                    <section class="about-model" id="about-model" aria-labelledby="about-model-title">
+                        <div class="about-heading">
+                            <div>
+                                <p class="eyebrow">"ABOUT THE MODEL"</p>
+                                <h2 id="about-model-title">"About Minimax"</h2>
+                            </div>
+                            <p class="about-intro">
+                                "Minimax searches legal replies and evaluates the positions it reaches."
+                            </p>
+                        </div>
+
+                        <div class="about-steps">
+                            <article>
+                                <span class="step-number">"01"</span>
+                                <h3>"Evaluate"</h3>
+                                <p>
+                                    "Material, piece placement, pawn structure, and king safety produce a centipawn score."
+                                </p>
+                            </article>
+                            <article>
+                                <span class="step-number">"02"</span>
+                                <h3>"Search replies"</h3>
+                                <p>
+                                    "The engine assumes both players choose the best move available."
+                                </p>
+                            </article>
+                            <article>
+                                <span class="step-number">"03"</span>
+                                <h3>"Prune"</h3>
+                                <p>
+                                    "Alpha-beta skips branches that cannot change the result."
+                                </p>
+                            </article>
+                        </div>
+
+                        <div class="about-summary">
+                            <strong>"Status"</strong>
+                            <p>
+                                "The search in minimax/src/search.rs must be completed before this engine can move."
+                            </p>
+                        </div>
+                    </section>
+                },
             }}
         </main>
     }
@@ -454,6 +506,7 @@ fn start_game(
     error: RwSignal<Option<String>>,
     game_id: RwSignal<u32>,
     pending_promotion: RwSignal<Option<(Square, Square)>>,
+    model: Model,
 ) {
     let starting_board = Board::from_fen(START_FEN).expect("valid start position");
     board.set(starting_board.clone());
@@ -475,6 +528,7 @@ fn start_game(
             // Nothing has been played yet, so the bot opens.
             String::new(),
             starting_board,
+            model,
         );
     }
 }
@@ -488,11 +542,12 @@ fn start_bot_turn(
     game_id: RwSignal<u32>,
     movetext: String,
     before_bot: Board,
+    model: Model,
 ) {
     thinking.set(true);
     let request_id = game_id.get_untracked();
     spawn_local(async move {
-        let result = request_bot(movetext, before_bot).await;
+        let result = request_bot(model, movetext, before_bot).await;
         if game_id.get_untracked() != request_id {
             return;
         }
@@ -507,12 +562,16 @@ fn start_bot_turn(
     });
 }
 
-async fn request_bot(movetext: String, mut before_bot: Board) -> Result<(Board, String), String> {
+async fn request_bot(
+    model: Model,
+    movetext: String,
+    mut before_bot: Board,
+) -> Result<(Board, String), String> {
     let payload = BotRequest { san: movetext };
     let mut gateway_retries = 1;
 
     let response = loop {
-        let response = Request::post(BOT_URL)
+        let response = Request::post(model.url())
             .json(&payload)
             .map_err(|error| error.to_string())?
             .send()

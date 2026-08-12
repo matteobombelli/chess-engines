@@ -1038,6 +1038,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "markov"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
+name = "minimax"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "chess-core",
+ "serde",
+ "tokio",
+]
+
+[[package]]
 name = "matchit"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"

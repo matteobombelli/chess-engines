@@ -8,5 +8,13 @@
 #   cargo run -p random   # 127.0.0.1:3000
 
 [[proxy]]
-rewrite = "/projects/chessengines/api/"
+rewrite = "/projects/chessengines/api/random/"
 backend = "http://127.0.0.1:3000/"
+
+[[proxy]]
+rewrite = "/projects/chessengines/api/markov/"
+backend = "http://127.0.0.1:3001/"
+
+[[proxy]]
+rewrite = "/projects/chessengines/api/minimax/"
+backend = "http://127.0.0.1:3002/"
