@@ -47,9 +47,15 @@ Deploy the committed `main` working tree to production with:
 ./scripts/deploy.sh
 ```
 
-The script runs the workspace tests, builds the random bot and frontend in release
-mode, publishes the frontend to `/srv/chessengines`, restarts the
-`chessengines-random` user service, and verifies the live page and API.
+The script runs the workspace tests, builds both bot APIs and the frontend in
+release mode, publishes the frontend to `/srv/chessengines`, restarts the
+`chessengines-random` and `chessengines-minimax` user services, and verifies
+both live API routes.
+
+Production service and reverse-proxy templates live under `deploy/`. Random
+listens on port 3002 and Minimax listens on port 3004. The production Minimax
+unit uses iterative deepening with a 9-second move budget and a depth ceiling
+of 64; the time budget normally stops the search first.
 
 ## Working rule
 

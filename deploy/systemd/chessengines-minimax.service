@@ -1,0 +1,21 @@
+[Unit]
+Description=Chess Engines minimax bot API
+After=network.target
+
+[Service]
+Type=simple
+User=hs
+Group=hs
+WorkingDirectory=/home/hs/chess-engines
+Environment=MINIMAX_BIND_ADDRESS=127.0.0.1:3004
+Environment=MINIMAX_DEPTH=64
+Environment=MINIMAX_MOVE_TIME_MS=9000
+ExecStart=/home/hs/chess-engines/target/release/minimax
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target

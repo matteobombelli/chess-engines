@@ -1,0 +1,14 @@
+# Put these handlers before the /projects/chessengines* static-file handler.
+# `handle_path` strips the matched prefix, so each API receives `/move`.
+handle_path /projects/chessengines/api/random/* {
+	reverse_proxy 127.0.0.1:3002
+}
+
+handle_path /projects/chessengines/api/minimax/* {
+	reverse_proxy 127.0.0.1:3004
+}
+
+# Keep the original Random endpoint working for older clients.
+handle_path /projects/chessengines/api/* {
+	reverse_proxy 127.0.0.1:3002
+}

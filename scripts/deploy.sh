@@ -6,8 +6,9 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 STATIC_ROOT="${CHESSENGINES_STATIC_ROOT:-/srv/chessengines}"
 PUBLIC_URL="${CHESSENGINES_PUBLIC_URL:-/projects/chessengines/}"
-SERVICE_NAME="${CHESSENGINES_SERVICE:-chessengines-random.service}"
-LIVE_URL="${CHESSENGINES_LIVE_URL:-https://matteob.dev/projects/chessengines/}"
+RANDOM_SERVICE_NAME="${CHESSENGINES_RANDOM_SERVICE:-${CHESSENGINES_SERVICE:-chessengines-random.service}}"
+MINIMAX_SERVICE_NAME="${CHESSENGINES_MINIMAX_SERVICE:-chessengines-minimax.service}"
+LIVE_URL="${CHESSENGINES_LIVE_URL:-https://apps.matteob.dev/projects/chessengines/}"
 CARGO_COMMAND="${CARGO_COMMAND:-$HOME/.cargo/bin/cargo}"
 TRUNK_COMMAND="${TRUNK_COMMAND:-$HOME/.cargo/bin/trunk}"
 
@@ -36,8 +37,8 @@ fi
 echo "Testing workspace..."
 "$CARGO_COMMAND" test --workspace
 
-echo "Building random bot..."
-"$CARGO_COMMAND" build --release -p random
+echo "Building bot APIs..."
+"$CARGO_COMMAND" build --release -p random -p minimax
 
 echo "Building frontend..."
 (
@@ -49,15 +50,20 @@ echo "Building frontend..."
 echo "Publishing frontend to $STATIC_ROOT..."
 rsync -a frontend/dist/ "$STATIC_ROOT/"
 
-echo "Restarting $SERVICE_NAME..."
-systemctl --user restart "$SERVICE_NAME"
-systemctl --user is-active --quiet "$SERVICE_NAME"
+echo "Restarting $RANDOM_SERVICE_NAME and $MINIMAX_SERVICE_NAME..."
+systemctl --user restart "$RANDOM_SERVICE_NAME" "$MINIMAX_SERVICE_NAME"
+systemctl --user is-active --quiet "$RANDOM_SERVICE_NAME"
+systemctl --user is-active --quiet "$MINIMAX_SERVICE_NAME"
 
 echo "Verifying live page and API..."
 curl --fail --silent --show-error "$LIVE_URL" >/dev/null
 curl --fail --silent --show-error \
     -H "content-type: application/json" \
     --data '{"san":"1. e4 e5 2. Nf3"}' \
-    "${LIVE_URL%/}/api/move" >/dev/null
+    "${LIVE_URL%/}/api/random/move" >/dev/null
+curl --fail --silent --show-error --max-time 60 \
+    -H "content-type: application/json" \
+    --data '{"san":"1. e4 e5 2. Nf3"}' \
+    "${LIVE_URL%/}/api/minimax/move" >/dev/null
 
 echo "Deployment complete: $LIVE_URL"
