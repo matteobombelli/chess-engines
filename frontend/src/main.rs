@@ -32,7 +32,16 @@ impl Model {
     fn note(self) -> &'static str {
         match self {
             Self::Random => "Chooses uniformly from every legal move.",
-            Self::Minimax => "Searches moves with alpha-beta pruning.",
+            Self::Minimax => {
+                "Calculates for 9 seconds using iterative deepening and alpha-beta pruning."
+            }
+        }
+    }
+
+    fn elo(self) -> &'static str {
+        match self {
+            Self::Random => "<400",
+            Self::Minimax => "≈2050",
         }
     }
 
@@ -353,9 +362,16 @@ fn App() -> impl IntoView {
                                 selected_model.set(Model::from_value(&event_target_value(&event)));
                             }
                         >
-                            <option value="random">"Random"</option>
-                            <option value="minimax">"Minimax"</option>
+                            <option value="random">"Random · <400 Elo"</option>
+                            <option value="minimax">"Minimax · ≈2050 Elo"</option>
                         </select>
+                        <div class="bot-rating">
+                            <span>"CHESS.COM 30+0"</span>
+                            <strong>
+                                {move || selected_model.get().elo()}
+                                <small>" Elo"</small>
+                            </strong>
+                        </div>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
                             "About "
@@ -407,10 +423,13 @@ fn App() -> impl IntoView {
                         <div class="about-heading">
                             <div>
                                 <p class="eyebrow">"ABOUT THE MODEL"</p>
-                                <h2 id="about-model-title">"About Random"</h2>
+                                <div class="model-title">
+                                    <h2 id="about-model-title">"About Random"</h2>
+                                    <span class="elo-pill">"<400 Elo"</span>
+                                </div>
                             </div>
                             <p class="about-intro">
-                                "Random knows the rules of chess but has no strategy. Each legal move has an equal chance of being selected."
+                                "Random knows the rules of chess but has no strategy. Each legal move has an equal chance of being selected, placing its measured move quality below 400 Chess.com 30+0."
                             </p>
                         </div>
 
@@ -451,41 +470,44 @@ fn App() -> impl IntoView {
                         <div class="about-heading">
                             <div>
                                 <p class="eyebrow">"ABOUT THE MODEL"</p>
-                                <h2 id="about-model-title">"About Minimax"</h2>
+                                <div class="model-title">
+                                    <h2 id="about-model-title">"About Minimax"</h2>
+                                    <span class="elo-pill">"≈2050 Elo"</span>
+                                </div>
                             </div>
                             <p class="about-intro">
-                                "Minimax searches legal replies and evaluates the positions it reaches."
+                                "Minimax looks ahead while assuming that both sides choose their strongest reply. It calculates for nine seconds and plays the best move from its deepest fully completed search."
                             </p>
                         </div>
 
                         <div class="about-steps">
                             <article>
                                 <span class="step-number">"01"</span>
-                                <h3>"Evaluate"</h3>
+                                <h3>"Score the board"</h3>
                                 <p>
-                                    "Material, piece placement, pawn structure, and king safety produce a centipawn score."
+                                    "Material, piece placement, pawn structure, bishop pairs, open rook files, king safety, and tempo combine into a centipawn score. Checkmate and draws receive exact terminal scores."
                                 </p>
                             </article>
                             <article>
                                 <span class="step-number">"02"</span>
-                                <h3>"Search replies"</h3>
+                                <h3>"Search deeper"</h3>
                                 <p>
-                                    "The engine assumes both players choose the best move available."
+                                    "Iterative deepening searches one ply farther at a time. A negamax search follows each side's best reply, and the last fully completed depth remains available when the clock expires."
                                 </p>
                             </article>
                             <article>
                                 <span class="step-number">"03"</span>
-                                <h3>"Prune"</h3>
+                                <h3>"Focus the work"</h3>
                                 <p>
-                                    "Alpha-beta skips branches that cannot change the result."
+                                    "Move ordering and alpha-beta pruning skip branches that cannot affect the choice. Quiescence search continues captures, promotions, and forced check evasions instead of stopping mid-tactic."
                                 </p>
                             </article>
                         </div>
 
                         <div class="about-summary">
-                            <strong>"Status"</strong>
+                            <strong>"Measured strength"</strong>
                             <p>
-                                "The search in minimax/src/search.rs must be completed before this engine can move."
+                                "At nine seconds per move, its calibrated move quality is about 2050 Chess.com 30+0, with a conservative 1900–2200 band. This is a historical-position estimate rather than a rated account, and its strength depends on the server CPU and load."
                             </p>
                         </div>
                     </section>

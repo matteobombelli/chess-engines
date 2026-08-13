@@ -319,6 +319,40 @@ select {
 
 select:hover { border-color: var(--steel); }
 
+.bot-rating {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 11px;
+    padding: 9px 11px;
+    border: 1px solid rgb(62 104 144 / 18%);
+    border-radius: 6px;
+    background: rgb(62 104 144 / 6%);
+}
+
+.bot-rating span {
+    color: var(--steel);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .12em;
+}
+
+.bot-rating strong {
+    color: var(--accent);
+    font-family: Fraunces, "Iowan Old Style", Georgia, serif;
+    font-size: 20px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.bot-rating small {
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+}
+
 .bot-note {
     margin: 11px 0 0;
     color: var(--ink-muted);
@@ -454,6 +488,25 @@ select:hover { border-color: var(--steel); }
 }
 
 .about-heading .eyebrow { margin-bottom: 9px; }
+
+.model-title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 16px;
+}
+
+.elo-pill {
+    padding: 5px 10px;
+    border: 1px solid rgb(62 104 144 / 24%);
+    border-radius: 999px;
+    color: var(--accent);
+    background: rgb(62 104 144 / 7%);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    white-space: nowrap;
+}
 
 h2 {
     margin: 0;
