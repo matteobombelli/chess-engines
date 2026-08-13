@@ -34,6 +34,34 @@ Before adding an ML model, run the repository tests:
 cargo test --workspace
 ```
 
+## Evaluate bot strength
+
+The `arena` crate plays Minimax and Random directly in-process, alternates
+colors, checks every move for legality, and reports their win/draw/loss record,
+match score, and relative Elo with an approximate 95% interval:
+
+```sh
+cargo run -p arena --release -- --games 200 --depth 3 --seed 1
+```
+
+The seed makes the Random moves reproducible. Keep the game count, Minimax
+depth, seed, and maximum plies fixed when comparing code changes. Use more than
+one seed and substantially more games for a result you intend to publish.
+
+This is a **relative** rating: the report defines Random as 0 Elo and estimates
+Minimax's difference from it. Two bots cannot establish an absolute human or
+online-platform Elo. That requires a calibrated pool of reference engines.
+
+When the arena is later used for two deterministic bots, give both bots the
+same suite of opening positions and play every opening twice with colors
+reversed. Random already supplies game-to-game variation in this first matchup.
+
+For a platform-calibrated estimate instead, the `calibrate` crate compares bot
+move quality with rated humans in public Chess.com games at exactly 30+0. See
+[`calibrate/README.md`](calibrate/README.md) for corpus collection, Stockfish
+analysis, statistical fitting, and the limits of that estimate. Chess.com calls
+30+0 Rapid, even though it is the slow/classical-style target used here.
+
 ## Minimax
 
 The `minimax` crate has a guided alpha-beta search scaffold in

@@ -1,4 +1,5 @@
 use chess_core::{Board, Move};
+use rand::Rng;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
@@ -32,8 +33,7 @@ pub struct BotResponse {
 pub fn respond(request: BotRequest) -> Result<BotResponse, String> {
     let mut board = position_from_request(&request)?;
 
-    let mv = *candidate_moves(&board)
-        .choose(&mut rand::thread_rng())
+    let mv = choose_move(&board, &mut rand::thread_rng())
         .ok_or_else(|| "game is over: no legal moves".to_string())?;
     board.make_move(mv);
 
@@ -45,6 +45,14 @@ pub fn respond(request: BotRequest) -> Result<BotResponse, String> {
             .expect("move was recorded"),
         fen: board.to_fen(),
     })
+}
+
+/// Choose uniformly from all legal moves using the supplied random source.
+///
+/// Supplying the RNG lets evaluators reproduce a match from its seed while the
+/// HTTP bot can continue to use fresh randomness for normal games.
+pub fn choose_move<R: Rng + ?Sized>(board: &Board, rng: &mut R) -> Option<Move> {
+    candidate_moves(board).choose(rng).copied()
 }
 
 fn position_from_request(request: &BotRequest) -> Result<Board, String> {
