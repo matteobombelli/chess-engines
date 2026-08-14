@@ -31,9 +31,9 @@ impl Model {
 
     fn note(self) -> &'static str {
         match self {
-            Self::Random => "Chooses uniformly from every legal move.",
+            Self::Random => "Chooses a legal move at random.",
             Self::Minimax => {
-                "Calculates for 9 seconds using iterative deepening and alpha-beta pruning."
+                "Searches for 9 seconds with iterative deepening and alpha-beta pruning."
             }
         }
     }
@@ -362,16 +362,13 @@ fn App() -> impl IntoView {
                                 selected_model.set(Model::from_value(&event_target_value(&event)));
                             }
                         >
-                            <option value="random">"Random · <400 Elo"</option>
-                            <option value="minimax">"Minimax · ≈2050 Elo"</option>
+                            <option value="random">"Random"</option>
+                            <option value="minimax">"Minimax"</option>
                         </select>
-                        <div class="bot-rating">
-                            <span>"CHESS.COM 30+0"</span>
-                            <strong>
-                                {move || selected_model.get().elo()}
-                                <small>" Elo"</small>
-                            </strong>
-                        </div>
+                        <p class="bot-rating">
+                            <span>"Estimated Chess.com 30+0 Elo"</span>
+                            <strong>{move || selected_model.get().elo()}</strong>
+                        </p>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
                             "About "
@@ -423,45 +420,32 @@ fn App() -> impl IntoView {
                         <div class="about-heading">
                             <div>
                                 <p class="eyebrow">"ABOUT THE MODEL"</p>
-                                <div class="model-title">
-                                    <h2 id="about-model-title">"About Random"</h2>
-                                    <span class="elo-pill">"<400 Elo"</span>
-                                </div>
+                                <h2 id="about-model-title">"Random"</h2>
                             </div>
                             <p class="about-intro">
-                                "Random knows the rules of chess but has no strategy. Each legal move has an equal chance of being selected, placing its measured move quality below 400 Chess.com 30+0."
+                                "Random generates every legal move and selects one with equal probability. It does not evaluate the position or search ahead."
                             </p>
                         </div>
 
-                        <div class="about-steps">
+                        <div class="about-details">
                             <article>
-                                <span class="step-number">"01"</span>
-                                <h3>"Read the position"</h3>
+                                <h3>"Implementation"</h3>
                                 <p>
-                                    "The bot receives the current position in Forsyth Edwards Notation (FEN). After you move, it receives that move in Standard Algebraic Notation (SAN)."
+                                    "The API rebuilds the game from its SAN move history, generates the legal moves, and returns one move with the resulting FEN."
                                 </p>
                             </article>
                             <article>
-                                <span class="step-number">"02"</span>
-                                <h3>"Find every legal move"</h3>
+                                <h3>"Rules"</h3>
                                 <p>
-                                    "It generates all moves allowed in that position, including castling, en passant, and each promotion choice. Moves that leave its king in check are excluded."
+                                    "Move generation handles castling, en passant, promotion, check, checkmate, and draw rules. Illegal moves that expose the king are excluded."
                                 </p>
                             </article>
                             <article>
-                                <span class="step-number">"03"</span>
-                                <h3>"Pick one at random"</h3>
+                                <h3>"Rating"</h3>
                                 <p>
-                                    "One candidate is selected uniformly, then returned as SAN together with the resulting FEN. The same position can produce a different reply each time."
+                                    "The calibration places its move quality below 400 Chess.com 30+0 Elo. Checkmates and blunders are both accidental."
                                 </p>
                             </article>
-                        </div>
-
-                        <div class="about-summary">
-                            <strong>"Limits"</strong>
-                            <p>
-                                "There is no search, position evaluation, training, or game memory. Checkmates and blunders are both accidental."
-                            </p>
                         </div>
                     </section>
                 },
@@ -470,45 +454,32 @@ fn App() -> impl IntoView {
                         <div class="about-heading">
                             <div>
                                 <p class="eyebrow">"ABOUT THE MODEL"</p>
-                                <div class="model-title">
-                                    <h2 id="about-model-title">"About Minimax"</h2>
-                                    <span class="elo-pill">"≈2050 Elo"</span>
-                                </div>
+                                <h2 id="about-model-title">"Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "Minimax looks ahead while assuming that both sides choose their strongest reply. It calculates for nine seconds and plays the best move from its deepest fully completed search."
+                                "Minimax searches legal moves for nine seconds, assuming each side chooses its best reply. It plays the best move from the last fully completed depth."
                             </p>
                         </div>
 
-                        <div class="about-steps">
+                        <div class="about-details">
                             <article>
-                                <span class="step-number">"01"</span>
-                                <h3>"Score the board"</h3>
+                                <h3>"Search"</h3>
                                 <p>
-                                    "Material, piece placement, pawn structure, bishop pairs, open rook files, king safety, and tempo combine into a centipawn score. Checkmate and draws receive exact terminal scores."
+                                    "Iterative deepening searches one ply at a time. Move ordering and alpha-beta pruning reduce the number of branches, while quiescence search continues tactical positions."
                                 </p>
                             </article>
                             <article>
-                                <span class="step-number">"02"</span>
-                                <h3>"Search deeper"</h3>
+                                <h3>"Evaluation"</h3>
                                 <p>
-                                    "Iterative deepening searches one ply farther at a time. A negamax search follows each side's best reply, and the last fully completed depth remains available when the clock expires."
+                                    "The evaluation combines material, piece placement, pawn structure, bishop pairs, open rook files, king safety, and tempo. Checkmate and draws use terminal scores."
                                 </p>
                             </article>
                             <article>
-                                <span class="step-number">"03"</span>
-                                <h3>"Focus the work"</h3>
+                                <h3>"Rating"</h3>
                                 <p>
-                                    "Move ordering and alpha-beta pruning skip branches that cannot affect the choice. Quiescence search continues captures, promotions, and forced check evasions instead of stopping mid-tactic."
+                                    "At nine seconds per move, the calibration estimates about 2050 Chess.com 30+0 Elo, with a 1900–2200 range. It is based on historical positions, not rated games."
                                 </p>
                             </article>
-                        </div>
-
-                        <div class="about-summary">
-                            <strong>"Measured strength"</strong>
-                            <p>
-                                "At nine seconds per move, its calibrated move quality is about 2050 Chess.com 30+0, with a conservative 1900–2200 band. This is a historical-position estimate rather than a rated account, and its strength depends on the server CPU and load."
-                            </p>
                         </div>
                     </section>
                 },
