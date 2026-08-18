@@ -9,6 +9,7 @@ PUBLIC_URL="${CHESSENGINES_PUBLIC_URL:-/projects/chessengines/}"
 RANDOM_SERVICE_NAME="${CHESSENGINES_RANDOM_SERVICE:-${CHESSENGINES_SERVICE:-chessengines-random.service}}"
 MINIMAX_SERVICE_NAME="${CHESSENGINES_MINIMAX_SERVICE:-chessengines-minimax.service}"
 LIVE_URL="${CHESSENGINES_LIVE_URL:-https://apps.matteob.dev/projects/chessengines/}"
+CADDY_CONFIG="${CHESSENGINES_CADDY_CONFIG:-/etc/caddy/Caddyfile}"
 CARGO_COMMAND="${CARGO_COMMAND:-$HOME/.cargo/bin/cargo}"
 TRUNK_COMMAND="${TRUNK_COMMAND:-$HOME/.cargo/bin/trunk}"
 
@@ -28,6 +29,41 @@ require_command curl
 CARGO_BIN_DIR="$(dirname -- "$(command -v "$CARGO_COMMAND")")"
 
 cd "$REPO_ROOT"
+
+check_proxy_config() {
+    local route
+    local missing_routes=()
+    local required_routes=(
+        "handle_path /projects/chessengines/api/random/*"
+        "handle_path /projects/chessengines/api/minimax/*"
+    )
+
+    if [[ ! -r "$CADDY_CONFIG" ]]; then
+        echo "Cannot read Caddy config: $CADDY_CONFIG" >&2
+        echo "Set CHESSENGINES_CADDY_CONFIG to the active config path." >&2
+        exit 1
+    fi
+
+    for route in "${required_routes[@]}"; do
+        if ! grep -Fq "$route" "$CADDY_CONFIG"; then
+            missing_routes+=("$route")
+        fi
+    done
+
+    if (( ${#missing_routes[@]} > 0 )); then
+        echo "Caddy is missing the namespaced Chess Engines API routes:" >&2
+        printf '  %s\n' "${missing_routes[@]}" >&2
+        echo >&2
+        echo "Merge deploy/caddy/chessengines.caddy before the static-file handler in:" >&2
+        echo "  $CADDY_CONFIG" >&2
+        echo "Then validate and reload Caddy before deploying:" >&2
+        echo "  sudo caddy validate --config $CADDY_CONFIG" >&2
+        echo "  sudo systemctl reload caddy" >&2
+        exit 1
+    fi
+}
+
+check_proxy_config
 
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "Refusing to deploy a dirty working tree. Commit or stash changes first." >&2

@@ -69,11 +69,30 @@ The `minimax` crate has a guided alpha-beta search scaffold in
 
 ## Deploy
 
-Deploy the committed `main` working tree to production with:
+From the production checkout, fetch, fast-forward, and deploy the exact commit
+currently on `origin/main` with:
 
 ```sh
-./scripts/deploy.sh
+./scripts/pull-and-deploy.sh
 ```
+
+This command refuses dirty checkouts, non-`main` branches, divergent history,
+and local-only commits. It never creates a merge commit or rewrites production
+history. For a build of the already-checked-out commit without fetching, use
+`./scripts/deploy.sh` directly.
+
+The active Caddy site must include the two namespaced API handlers from
+`deploy/caddy/chessengines.caddy` before its Chess Engines static-file handler.
+After changing Caddy, validate and reload it once:
+
+```sh
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+The deploy script checks those routes before building or changing production,
+so an outdated proxy configuration cannot leave a partially deployed release.
+Set `CHESSENGINES_CADDY_CONFIG` if the active Caddyfile lives elsewhere.
 
 The script runs the workspace tests, builds both bot APIs and the frontend in
 release mode, publishes the frontend to `/srv/chessengines`, restarts the
