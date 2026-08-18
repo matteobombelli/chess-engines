@@ -303,9 +303,9 @@ aside {
 
 .bot-panel { padding: 18px; }
 
-.bot-panel label {
+.bot-label {
     display: block;
-    margin-bottom: 8px;
+    margin: 0 0 8px;
     color: var(--steel);
     font-size: 12px;
     font-weight: 600;
@@ -313,10 +313,14 @@ aside {
     letter-spacing: .14em;
 }
 
-.bot-select {
-    appearance: base-select;
+.bot-selector {
+    position: relative;
+}
+
+.bot-selector summary {
     display: flex;
     align-items: baseline;
+    gap: 10px;
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line-strong);
@@ -326,35 +330,70 @@ aside {
     font-weight: 600;
     cursor: pointer;
     transition: border-color .15s ease, background-color .15s ease;
+    list-style: none;
 }
 
-.bot-select::picker(select) {
-    appearance: base-select;
+.bot-selector summary::-webkit-details-marker { display: none; }
+
+.bot-selector summary::after {
+    width: 7px;
+    height: 7px;
+    margin-left: 2px;
+    border-right: 1.5px solid var(--steel);
+    border-bottom: 1.5px solid var(--steel);
+    content: "";
+    transform: translateY(-2px) rotate(45deg);
+    transition: transform .15s ease;
+}
+
+.bot-selector[open] summary {
+    border-color: var(--steel);
+    background: var(--paper);
+}
+
+.bot-selector[open] summary::after {
+    transform: translateY(2px) rotate(225deg);
+}
+
+.bot-options {
+    position: absolute;
+    z-index: 10;
+    top: calc(100% + 5px);
+    right: 0;
+    left: 0;
+    display: grid;
+    gap: 2px;
+    padding: 5px;
     border: 1px solid var(--line-strong);
     border-radius: 6px;
     background: var(--paper-raised);
     box-shadow: 0 12px 28px -18px rgb(16 42 74 / 45%);
 }
 
-.bot-select:hover { border-color: var(--steel); }
-
-.bot-select option {
+.bot-option {
     display: flex;
     align-items: baseline;
+    justify-content: space-between;
     gap: 8px;
+    width: 100%;
     padding: 10px 12px;
+    border: 0;
+    border-radius: 4px;
     color: var(--ink);
     background: var(--paper-raised);
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
 }
 
-.bot-select option:hover,
-.bot-select option:checked {
+.bot-option:hover,
+.bot-option.selected {
     background: var(--paper);
 }
 
 .bot-option-elo {
     margin-left: auto;
-    color: var(--ink-muted);
+    color: #8b94a3;
     font-size: 11px;
     font-weight: 500;
     white-space: nowrap;

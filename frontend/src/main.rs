@@ -15,15 +15,6 @@ enum Model {
 }
 
 impl Model {
-    fn from_value(value: &str) -> Self {
-        match value {
-            "random" => Self::Random,
-            "minimax-depth-3" => Self::MinimaxDepth3,
-            "minimax-9-seconds" => Self::MinimaxNineSeconds,
-            _ => Self::Random,
-        }
-    }
-
     fn name(self) -> &'static str {
         match self {
             Self::Random => "Random",
@@ -37,6 +28,14 @@ impl Model {
             Self::Random => "Chooses a legal move at random.",
             Self::MinimaxDepth3 => "Searches three moves ahead and usually responds quickly.",
             Self::MinimaxNineSeconds => "Searches for up to nine seconds before each move.",
+        }
+    }
+
+    fn selector_label(self) -> &'static str {
+        match self {
+            Self::Random => "Random",
+            Self::MinimaxDepth3 => "Minimax · depth 3",
+            Self::MinimaxNineSeconds => "Minimax · 9 seconds",
         }
     }
 
@@ -87,6 +86,7 @@ fn App() -> impl IntoView {
     let pending_promotion = RwSignal::new(None::<(Square, Square)>);
     let player_color = RwSignal::new(Color::White);
     let selected_model = RwSignal::new(Model::Random);
+    let bot_selector = NodeRef::<leptos::html::Details>::new();
 
     let reset = move |_| {
         start_game(
@@ -359,36 +359,40 @@ fn App() -> impl IntoView {
 
                 <aside>
                     <div class="panel bot-panel">
-                        <label for="bot">"Opponent"</label>
-                        <select
-                            id="bot"
-                            class="bot-select"
-                            on:change=move |event| {
-                                selected_model.set(Model::from_value(&event_target_value(&event)));
-                            }
-                        >
-                            <option value="random">
-                                <span>"Random"</span>
+                        <p class="bot-label" id="opponent-label">"Opponent"</p>
+                        <details class="bot-selector" node_ref=bot_selector>
+                            <summary aria-labelledby="opponent-label">
+                                <span>{move || selected_model.get().selector_label()}</span>
                                 <span class="bot-option-elo">
-                                    " — "
-                                    {Model::Random.elo_label()}
+                                    {move || selected_model.get().elo_label()}
                                 </span>
-                            </option>
-                            <option value="minimax-depth-3">
-                                <span>"Minimax · depth 3"</span>
-                                <span class="bot-option-elo">
-                                    " — "
-                                    {Model::MinimaxDepth3.elo_label()}
-                                </span>
-                            </option>
-                            <option value="minimax-9-seconds">
-                                <span>"Minimax · 9 seconds"</span>
-                                <span class="bot-option-elo">
-                                    " — "
-                                    {Model::MinimaxNineSeconds.elo_label()}
-                                </span>
-                            </option>
-                        </select>
+                            </summary>
+                            <div class="bot-options" aria-labelledby="opponent-label">
+                                {[Model::Random, Model::MinimaxDepth3, Model::MinimaxNineSeconds]
+                                    .into_iter()
+                                    .map(|model| view! {
+                                        <button
+                                            type="button"
+                                            class=move || if selected_model.get() == model {
+                                                "bot-option selected"
+                                            } else {
+                                                "bot-option"
+                                            }
+                                            aria-pressed=move || selected_model.get() == model
+                                            on:click=move |_| {
+                                                selected_model.set(model);
+                                                if let Some(selector) = bot_selector.get() {
+                                                    let _ = selector.remove_attribute("open");
+                                                }
+                                            }
+                                        >
+                                            <span>{model.selector_label()}</span>
+                                            <span class="bot-option-elo">{model.elo_label()}</span>
+                                        </button>
+                                    })
+                                    .collect_view()}
+                            </div>
+                        </details>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
                             "About "
