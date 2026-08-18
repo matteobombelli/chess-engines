@@ -65,5 +65,9 @@ curl --fail --silent --show-error --max-time 60 \
     -H "content-type: application/json" \
     --data '{"san":"1. e4 e5 2. Nf3"}' \
     "${LIVE_URL%/}/api/minimax/move" >/dev/null
+curl --fail --silent --show-error --max-time 60 \
+    -H "content-type: application/json" \
+    --data '{"san":"1. e4 e5 2. Nf3"}' \
+    "${LIVE_URL%/}/api/minimax/depth-3/move" >/dev/null
 
 echo "Deployment complete: $LIVE_URL"

@@ -10,14 +10,16 @@ const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Model {
     Random,
-    Minimax,
+    MinimaxDepth3,
+    MinimaxNineSeconds,
 }
 
 impl Model {
     fn from_value(value: &str) -> Self {
         match value {
             "random" => Self::Random,
-            "minimax" => Self::Minimax,
+            "minimax-depth-3" => Self::MinimaxDepth3,
+            "minimax-9-seconds" => Self::MinimaxNineSeconds,
             _ => Self::Random,
         }
     }
@@ -25,30 +27,32 @@ impl Model {
     fn name(self) -> &'static str {
         match self {
             Self::Random => "Random",
-            Self::Minimax => "Minimax",
+            Self::MinimaxDepth3 => "Depth-3 Minimax",
+            Self::MinimaxNineSeconds => "9-second Minimax",
         }
     }
 
     fn note(self) -> &'static str {
         match self {
             Self::Random => "Chooses a legal move at random.",
-            Self::Minimax => {
-                "Searches for 9 seconds with iterative deepening and alpha-beta pruning."
-            }
+            Self::MinimaxDepth3 => "Searches three moves ahead and usually responds quickly.",
+            Self::MinimaxNineSeconds => "Searches for up to nine seconds before each move.",
         }
     }
 
     fn elo(self) -> &'static str {
         match self {
             Self::Random => "<400",
-            Self::Minimax => "≈2050",
+            Self::MinimaxDepth3 => "≈1675",
+            Self::MinimaxNineSeconds => "≈2050",
         }
     }
 
     fn url(self) -> &'static str {
         match self {
             Self::Random => "/projects/chessengines/api/random/move",
-            Self::Minimax => "/projects/chessengines/api/minimax/move",
+            Self::MinimaxDepth3 => "/projects/chessengines/api/minimax/depth-3/move",
+            Self::MinimaxNineSeconds => "/projects/chessengines/api/minimax/move",
         }
     }
 }
@@ -363,7 +367,8 @@ fn App() -> impl IntoView {
                             }
                         >
                             <option value="random">"Random"</option>
-                            <option value="minimax">"Minimax"</option>
+                            <option value="minimax-depth-3">"Minimax · depth 3"</option>
+                            <option value="minimax-9-seconds">"Minimax · 9 seconds"</option>
                         </select>
                         <p class="bot-rating">
                             <span>"Estimated Chess.com 30+0 Elo"</span>
@@ -419,11 +424,11 @@ fn App() -> impl IntoView {
                     <section class="about-model" id="about-model" aria-labelledby="about-model-title">
                         <div class="about-heading">
                             <div>
-                                <p class="eyebrow">"ABOUT THE MODEL"</p>
+                                <p class="eyebrow">"ABOUT THE ENGINE"</p>
                                 <h2 id="about-model-title">"Random"</h2>
                             </div>
                             <p class="about-intro">
-                                "Random generates every legal move and selects one with equal probability. It does not evaluate the position or search ahead."
+                                "Random knows the rules of chess, but it has no strategy. It chooses from all legal moves with equal odds."
                             </p>
                         </div>
 
@@ -431,33 +436,33 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Implementation"</h3>
                                 <p>
-                                    "The API rebuilds the game from its SAN move history, generates the legal moves, and returns one move with the resulting FEN."
+                                    "The browser sends the moves played so far. The API rebuilds the board, finds every legal move, and returns one at random."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rules"</h3>
                                 <p>
-                                    "Move generation handles castling, en passant, promotion, check, checkmate, and draw rules. Illegal moves that expose the king are excluded."
+                                    "The shared rules engine handles castling, en passant, promotion, check, checkmate, and draws. It leaves out any move that would expose its king."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "The calibration places its move quality below 400 Chess.com 30+0 Elo. Checkmates and blunders are both accidental."
+                                    "On historical 30+0 positions, its move quality fell below the lowest group in the calibration, which starts at 400 Chess.com Elo. It can find checkmate, but only by chance."
                                 </p>
                             </article>
                         </div>
                     </section>
                 },
-                Model::Minimax => view! {
+                Model::MinimaxDepth3 => view! {
                     <section class="about-model" id="about-model" aria-labelledby="about-model-title">
                         <div class="about-heading">
                             <div>
-                                <p class="eyebrow">"ABOUT THE MODEL"</p>
-                                <h2 id="about-model-title">"Minimax"</h2>
+                                <p class="eyebrow">"ABOUT THE ENGINE"</p>
+                                <h2 id="about-model-title">"Depth-3 Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "Minimax searches legal moves for nine seconds, assuming each side chooses its best reply. It plays the best move from the last fully completed depth."
+                                "Depth-3 Minimax looks three moves ahead and chooses the line with the best score. Since the search always stops at the same depth, it usually replies quickly."
                             </p>
                         </div>
 
@@ -465,19 +470,53 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "Iterative deepening searches one ply at a time. Move ordering and alpha-beta pruning reduce the number of branches, while quiescence search continues tactical positions."
+                                    "It assumes both sides choose their strongest move. If the third move leads to more captures or leaves a king in check, the engine follows those replies before it scores the position."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Evaluation"</h3>
                                 <p>
-                                    "The evaluation combines material, piece placement, pawn structure, bishop pairs, open rook files, king safety, and tempo. Checkmate and draws use terminal scores."
+                                    "The score weighs material, piece placement, pawn structure, open files, and king safety. It gives a small bonus to the side to move. Checkmate is decisive and draws are even."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "At nine seconds per move, the calibration estimates about 2050 Chess.com 30+0 Elo, with a 1900–2200 range. It is based on historical positions, not rated games."
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 1675 Chess.com Elo. The likely range is 1550 to 1800. It did not play full games on Chess.com."
+                                </p>
+                            </article>
+                        </div>
+                    </section>
+                },
+                Model::MinimaxNineSeconds => view! {
+                    <section class="about-model" id="about-model" aria-labelledby="about-model-title">
+                        <div class="about-heading">
+                            <div>
+                                <p class="eyebrow">"ABOUT THE ENGINE"</p>
+                                <h2 id="about-model-title">"9-second Minimax"</h2>
+                            </div>
+                            <p class="about-intro">
+                                "The timed engine searches for up to nine seconds before each move. It starts shallow and keeps searching deeper until time runs out."
+                            </p>
+                        </div>
+
+                        <div class="about-details">
+                            <article>
+                                <h3>"Search"</h3>
+                                <p>
+                                    "It saves the best move after every finished search, so the next, deeper search can use all the time left. Move ordering and alpha-beta pruning skip lines that cannot change its choice."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Evaluation"</h3>
+                                <p>
+                                    "The score weighs material, piece placement, pawn structure, open files, and king safety. It gives a small bonus to the side to move. Checkmate is decisive and draws are even."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Rating"</h3>
+                                <p>
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 2050 Chess.com Elo. The likely range is 1900 to 2200. It did not play full games on Chess.com."
                                 </p>
                             </article>
                         </div>
@@ -749,6 +788,18 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minimax_options_use_separate_routes() {
+        assert_eq!(
+            Model::from_value("minimax-depth-3").url(),
+            "/projects/chessengines/api/minimax/depth-3/move"
+        );
+        assert_eq!(
+            Model::from_value("minimax-9-seconds").url(),
+            "/projects/chessengines/api/minimax/move"
+        );
+    }
 
     #[test]
     fn promotion_destination_keeps_all_four_choices() {

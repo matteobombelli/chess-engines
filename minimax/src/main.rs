@@ -8,6 +8,12 @@ use axum::{
 use minimax::{BotError, BotRequest, SearchError, SearchLimits, respond_with_limits};
 use serde::Serialize;
 
+const DEPTH_THREE_LIMITS: SearchLimits = SearchLimits {
+    max_depth: 3,
+    move_time: None,
+    max_nodes: None,
+};
+
 #[derive(Clone, Copy)]
 struct AppState {
     limits: SearchLimits,
@@ -19,7 +25,15 @@ struct ErrorResponse {
 }
 
 async fn move_handler(State(state): State<AppState>, Json(request): Json<BotRequest>) -> Response {
-    let mut response = match respond_with_limits(request, state.limits) {
+    move_response(request, state.limits)
+}
+
+async fn depth_three_move_handler(Json(request): Json<BotRequest>) -> Response {
+    move_response(request, DEPTH_THREE_LIMITS)
+}
+
+fn move_response(request: BotRequest, limits: SearchLimits) -> Response {
+    let mut response = match respond_with_limits(request, limits) {
         Ok(reply) => (StatusCode::OK, Json(reply)).into_response(),
         Err(error) => (
             status_for_error(&error),
@@ -74,6 +88,8 @@ async fn main() {
     let app = Router::new()
         .route("/move", post(move_handler))
         .route("/move", options(preflight))
+        .route("/depth-3/move", post(depth_three_move_handler))
+        .route("/depth-3/move", options(preflight))
         .with_state(AppState { limits });
     let bind_address =
         std::env::var("MINIMAX_BIND_ADDRESS").unwrap_or_else(|_| "127.0.0.1:3002".to_string());
@@ -102,5 +118,17 @@ mod tests {
             status_for_error(&BotError::GameOver(Status::Checkmate)),
             StatusCode::CONFLICT
         );
+    }
+
+    #[test]
+    fn depth_three_move_returns_a_reply() {
+        let response = move_response(
+            BotRequest {
+                san: Some("1. e4".to_string()),
+            },
+            DEPTH_THREE_LIMITS,
+        );
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 }
