@@ -3,18 +3,19 @@
 ## Result
 
 The production Minimax configuration is best labeled **about 2050 Chess.com
-30+0**, with a conservative calibrated band of **1900-2200**.
+30+0 Elo**. Its 95% player-bootstrap confidence interval starts at **1889** and
+is right-censored at or above **2199**.
 
 The primary 100-rating-band regression estimated 2030. Moving the lower fit
 boundary from 1600 to 1700 estimated 2077, while unbinned regressions over
 reasonable windows ranged from 2009 to 2120. Reporting 2050 avoids implying
 more precision than the data supports.
 
-The player-bootstrap lower endpoint was about 1900. Its upper endpoint crossed
-the highest adequately populated band, so 2200 is a data-coverage boundary,
-not proof of a hard 2200 ceiling. The 2200-2299 sample had only 19 observations
-and was non-monotonic; it is useful evidence that uncertainty remains, but is
-not enough to support extrapolating a precise higher rating.
+The 95% player-bootstrap confidence interval starts at 1889. Its upper endpoint
+is at or above 2199, the highest adequately populated rating group. This makes
+the upper endpoint right-censored, not proof of a hard 2199 ceiling. The 2200
+to 2299 sample had only 19 observations and was non-monotonic. It shows that
+uncertainty remains but does not support a precise higher endpoint.
 
 ## Evidence
 

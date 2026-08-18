@@ -4,17 +4,17 @@ Date: 2026-08-18
 
 ## Result
 
-The fixed-depth engine is best labeled **about 1675 Chess.com 30+0 Elo**, with
-a rounded range of **1550 to 1800**.
+The fixed-depth engine is best labeled **about 1675 Chess.com 30+0 Elo**. Its
+95% player-bootstrap confidence interval is **1572 to 1748**.
 
 The full 100-rating-band regression estimated 1669. Leaving out the smaller
 2200 to 2299 band estimated 1674. Using 200-rating bands estimated 1676 across
 the full range and 1680 through 2199. The point estimate stayed within 11
 rating points across these checks.
 
-The player-bootstrap interval for the full fit was 1572 to 1748. The displayed
-range rounds those endpoints outward to avoid implying more precision than the
-data supports.
+The interval uses 20,000 whole-player bootstrap repetitions. It resamples
+players rather than individual positions so repeated observations from one
+person are not treated as independent evidence.
 
 ## Evidence
 

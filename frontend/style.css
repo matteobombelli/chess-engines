@@ -303,9 +303,9 @@ aside {
 
 .bot-panel { padding: 18px; }
 
-.bot-panel label {
+.bot-label {
     display: block;
-    margin-bottom: 8px;
+    margin: 0 0 8px;
     color: var(--steel);
     font-size: 12px;
     font-weight: 600;
@@ -313,7 +313,16 @@ aside {
     letter-spacing: .14em;
 }
 
-select {
+.bot-selector {
+    display: grid;
+    gap: 6px;
+}
+
+.bot-option {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
     width: 100%;
     padding: 10px 12px;
     border: 1px solid var(--line-strong);
@@ -321,10 +330,25 @@ select {
     color: var(--ink);
     background: var(--paper-raised);
     font-weight: 600;
+    text-align: left;
     cursor: pointer;
+    transition: border-color .15s ease, background-color .15s ease;
 }
 
-select:hover { border-color: var(--steel); }
+.bot-option:hover { border-color: var(--steel); }
+
+.bot-option.selected {
+    border-color: var(--steel);
+    background: var(--paper);
+    box-shadow: inset 3px 0 0 var(--steel);
+}
+
+.bot-option-elo {
+    color: var(--ink-muted);
+    font-size: 11px;
+    font-weight: 500;
+    white-space: nowrap;
+}
 
 .bot-rating {
     display: flex;
@@ -346,6 +370,13 @@ select:hover { border-color: var(--steel); }
     font-size: 13px;
     font-weight: 600;
     white-space: nowrap;
+}
+
+.bot-confidence {
+    margin: 5px 0 0;
+    color: var(--ink-muted);
+    font-size: 11px;
+    line-height: 1.4;
 }
 
 .bot-note {

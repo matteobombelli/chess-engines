@@ -15,15 +15,6 @@ enum Model {
 }
 
 impl Model {
-    fn from_value(value: &str) -> Self {
-        match value {
-            "random" => Self::Random,
-            "minimax-depth-3" => Self::MinimaxDepth3,
-            "minimax-9-seconds" => Self::MinimaxNineSeconds,
-            _ => Self::Random,
-        }
-    }
-
     fn name(self) -> &'static str {
         match self {
             Self::Random => "Random",
@@ -45,6 +36,22 @@ impl Model {
             Self::Random => "<400",
             Self::MinimaxDepth3 => "≈1675",
             Self::MinimaxNineSeconds => "≈2050",
+        }
+    }
+
+    fn elo_label(self) -> &'static str {
+        match self {
+            Self::Random => "<400 Elo",
+            Self::MinimaxDepth3 => "≈1675 Elo",
+            Self::MinimaxNineSeconds => "≈2050 Elo",
+        }
+    }
+
+    fn confidence_interval(self) -> &'static str {
+        match self {
+            Self::Random => "95% CI: below 400 (both endpoints censored)",
+            Self::MinimaxDepth3 => "95% CI: 1572 to 1748",
+            Self::MinimaxNineSeconds => "95% CI: 1889 to at least 2199",
         }
     }
 
@@ -359,20 +366,37 @@ fn App() -> impl IntoView {
 
                 <aside>
                     <div class="panel bot-panel">
-                        <label for="bot">"Opponent"</label>
-                        <select
-                            id="bot"
-                            on:change=move |event| {
-                                selected_model.set(Model::from_value(&event_target_value(&event)));
-                            }
-                        >
-                            <option value="random">"Random"</option>
-                            <option value="minimax-depth-3">"Minimax · depth 3"</option>
-                            <option value="minimax-9-seconds">"Minimax · 9 seconds"</option>
-                        </select>
+                        <p class="bot-label" id="opponent-label">"Opponent"</p>
+                        <div class="bot-selector" role="group" aria-labelledby="opponent-label">
+                            {[
+                                (Model::Random, "Random"),
+                                (Model::MinimaxDepth3, "Minimax · depth 3"),
+                                (Model::MinimaxNineSeconds, "Minimax · 9 seconds"),
+                            ]
+                                .into_iter()
+                                .map(|(model, label)| view! {
+                                    <button
+                                        type="button"
+                                        class=move || if selected_model.get() == model {
+                                            "bot-option selected"
+                                        } else {
+                                            "bot-option"
+                                        }
+                                        aria-pressed=move || selected_model.get() == model
+                                        on:click=move |_| selected_model.set(model)
+                                    >
+                                        <span>{label}</span>
+                                        <span class="bot-option-elo">{model.elo_label()}</span>
+                                    </button>
+                                })
+                                .collect_view()}
+                        </div>
                         <p class="bot-rating">
                             <span>"Estimated Chess.com 30+0 Elo"</span>
                             <strong>{move || selected_model.get().elo()}</strong>
+                        </p>
+                        <p class="bot-confidence">
+                            {move || selected_model.get().confidence_interval()}
                         </p>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
@@ -448,7 +472,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality fell below the lowest group in the calibration, which starts at 400 Chess.com Elo. It can find checkmate, but only by chance."
+                                    "On historical 30+0 positions, its move quality fell below 400 Chess.com Elo. The 95% player-bootstrap CI is also below 400, with both endpoints censored by the calibration floor."
                                 </p>
                             </article>
                         </div>
@@ -482,7 +506,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 1675 Chess.com Elo. The likely range is 1550 to 1800. It did not play full games on Chess.com."
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 1675 Chess.com Elo. The 95% player-bootstrap CI is 1572 to 1748. It did not play full games on Chess.com."
                                 </p>
                             </article>
                         </div>
@@ -516,7 +540,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 2050 Chess.com Elo. The likely range is 1900 to 2200. It did not play full games on Chess.com."
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 2050 Chess.com Elo. The 95% player-bootstrap CI starts at 1889. Its upper endpoint is at or above 2199, the highest well-populated rating group."
                                 </p>
                             </article>
                         </div>
@@ -792,12 +816,31 @@ mod tests {
     #[test]
     fn minimax_options_use_separate_routes() {
         assert_eq!(
-            Model::from_value("minimax-depth-3").url(),
+            Model::MinimaxDepth3.url(),
             "/projects/chessengines/api/minimax/depth-3/move"
         );
         assert_eq!(
-            Model::from_value("minimax-9-seconds").url(),
+            Model::MinimaxNineSeconds.url(),
             "/projects/chessengines/api/minimax/move"
+        );
+    }
+
+    #[test]
+    fn model_labels_include_elo_and_confidence() {
+        assert_eq!(Model::Random.elo_label(), "<400 Elo");
+        assert_eq!(
+            Model::Random.confidence_interval(),
+            "95% CI: below 400 (both endpoints censored)"
+        );
+        assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1675 Elo");
+        assert_eq!(
+            Model::MinimaxDepth3.confidence_interval(),
+            "95% CI: 1572 to 1748"
+        );
+        assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2050 Elo");
+        assert_eq!(
+            Model::MinimaxNineSeconds.confidence_interval(),
+            "95% CI: 1889 to at least 2199"
         );
     }
 

@@ -41,6 +41,10 @@ The generated corpus is `data/chesscom-30-0.jsonl`. It is ignored by Git.
 | Random, seed 1 | below 400 | below the lowest populated calibration band |
 | Minimax, fixed depth 3 | about 1,750 | approximately 1,550 to above 2,000 |
 
+For Random, the 95% player-bootstrap confidence interval is entirely below
+400. Both endpoints are censored by the calibration floor, so the data does not
+support a finite lower or upper endpoint.
+
 For Minimax, requiring at least 25 samples per 200-point band produced an
 estimate of 1752, a player-bootstrap interval of 1560 through beyond the populated
 1999-point boundary, and `R² = 0.846`. Allowing the smaller 2000–2199 band with

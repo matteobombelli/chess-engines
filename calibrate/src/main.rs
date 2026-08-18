@@ -526,21 +526,6 @@ fn run_report(args: &[String]) -> Result<(), String> {
     match report.estimate {
         RatingEstimate::Estimated(rating) => {
             println!("Chess.com 30+0 equivalent: {:.0}", rating);
-            if let Some((report_low, report_high)) = report.interval_95 {
-                let low = report_low.max(f64::from(calibrated_low));
-                let high = report_high.min(f64::from(calibrated_high));
-                let low_label = if low == f64::from(calibrated_low) {
-                    format!("at or below {calibrated_low}")
-                } else {
-                    format!("{low:.0}")
-                };
-                let high_label = if high == f64::from(calibrated_high) {
-                    format!("at or above {calibrated_high}")
-                } else {
-                    format!("{high:.0}")
-                };
-                println!("Approx. 95% player-bootstrap interval: {low_label} to {high_label}");
-            }
         }
         RatingEstimate::BelowRange(rating) => {
             println!("Chess.com 30+0 equivalent: below {rating}");
@@ -551,11 +536,36 @@ fn run_report(args: &[String]) -> Result<(), String> {
             println!("Uncertainty is censored by the highest populated rating band.");
         }
     }
-    if report.interval_95.is_none() {
-        println!(
-            "Approx. 95% player-bootstrap interval: unavailable (only {} finite fits)",
-            report.bootstrap_finite
-        );
+    match report.interval_95 {
+        Some((_report_low, report_high)) if report_high < f64::from(calibrated_low) => {
+            println!(
+                "Approx. 95% player-bootstrap interval: below {calibrated_low} (both endpoints censored)"
+            );
+        }
+        Some((report_low, _report_high)) if report_low > f64::from(calibrated_high) => {
+            println!(
+                "Approx. 95% player-bootstrap interval: above {calibrated_high} (both endpoints censored)"
+            );
+        }
+        Some((report_low, report_high)) => {
+            let low_label = if report_low <= f64::from(calibrated_low) {
+                format!("at or below {calibrated_low}")
+            } else {
+                format!("{report_low:.0}")
+            };
+            let high_label = if report_high >= f64::from(calibrated_high) {
+                format!("at or above {calibrated_high}")
+            } else {
+                format!("{report_high:.0}")
+            };
+            println!("Approx. 95% player-bootstrap interval: {low_label} to {high_label}");
+        }
+        None => {
+            println!(
+                "Approx. 95% player-bootstrap interval: unavailable (only {} finite fits)",
+                report.bootstrap_finite
+            );
+        }
     }
     println!(
         "Calibration fit: slope {:.4} expected points / 100 rating, R² {:.3}",

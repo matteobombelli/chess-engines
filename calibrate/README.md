@@ -147,8 +147,10 @@ uncertainty above 2000 due to sparse exact-30+0 data there.
 
 The refined fixed-depth-3 result is in
 [`DEPTH_THREE_RESULTS.md`](DEPTH_THREE_RESULTS.md). It replaces the preliminary
-Minimax figure with an estimate of about 1675 and a rounded 1550 to 1800 range.
+Minimax figure with an estimate of about 1675 and a 95% player-bootstrap
+confidence interval of 1572 to 1748.
 
 The stronger-player calibration for the deployed 9-second move budget is in
 [`NINE_SECOND_RESULTS.md`](NINE_SECOND_RESULTS.md). It estimates roughly 2050
-Chess.com 30+0, with a conservative 1900-2200 calibrated band.
+Chess.com 30+0. Its 95% player-bootstrap confidence interval starts at 1889 and
+is right-censored at or above 2199.
