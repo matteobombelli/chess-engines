@@ -15,6 +15,15 @@ enum Model {
 }
 
 impl Model {
+    fn from_value(value: &str) -> Self {
+        match value {
+            "random" => Self::Random,
+            "minimax-depth-3" => Self::MinimaxDepth3,
+            "minimax-9-seconds" => Self::MinimaxNineSeconds,
+            _ => Self::Random,
+        }
+    }
+
     fn name(self) -> &'static str {
         match self {
             Self::Random => "Random",
@@ -31,27 +40,11 @@ impl Model {
         }
     }
 
-    fn elo(self) -> &'static str {
-        match self {
-            Self::Random => "<400",
-            Self::MinimaxDepth3 => "≈1675",
-            Self::MinimaxNineSeconds => "≈2050",
-        }
-    }
-
     fn elo_label(self) -> &'static str {
         match self {
             Self::Random => "<400 Elo",
             Self::MinimaxDepth3 => "≈1675 Elo",
             Self::MinimaxNineSeconds => "≈2050 Elo",
-        }
-    }
-
-    fn confidence_interval(self) -> &'static str {
-        match self {
-            Self::Random => "95% CI: below 400 (both endpoints censored)",
-            Self::MinimaxDepth3 => "95% CI: 1572 to 1748",
-            Self::MinimaxNineSeconds => "95% CI: 1889 to at least 2199",
         }
     }
 
@@ -366,38 +359,36 @@ fn App() -> impl IntoView {
 
                 <aside>
                     <div class="panel bot-panel">
-                        <p class="bot-label" id="opponent-label">"Opponent"</p>
-                        <div class="bot-selector" role="group" aria-labelledby="opponent-label">
-                            {[
-                                (Model::Random, "Random"),
-                                (Model::MinimaxDepth3, "Minimax · depth 3"),
-                                (Model::MinimaxNineSeconds, "Minimax · 9 seconds"),
-                            ]
-                                .into_iter()
-                                .map(|(model, label)| view! {
-                                    <button
-                                        type="button"
-                                        class=move || if selected_model.get() == model {
-                                            "bot-option selected"
-                                        } else {
-                                            "bot-option"
-                                        }
-                                        aria-pressed=move || selected_model.get() == model
-                                        on:click=move |_| selected_model.set(model)
-                                    >
-                                        <span>{label}</span>
-                                        <span class="bot-option-elo">{model.elo_label()}</span>
-                                    </button>
-                                })
-                                .collect_view()}
-                        </div>
-                        <p class="bot-rating">
-                            <span>"Estimated Chess.com 30+0 Elo"</span>
-                            <strong>{move || selected_model.get().elo()}</strong>
-                        </p>
-                        <p class="bot-confidence">
-                            {move || selected_model.get().confidence_interval()}
-                        </p>
+                        <label for="bot">"Opponent"</label>
+                        <select
+                            id="bot"
+                            class="bot-select"
+                            on:change=move |event| {
+                                selected_model.set(Model::from_value(&event_target_value(&event)));
+                            }
+                        >
+                            <option value="random">
+                                <span>"Random"</span>
+                                <span class="bot-option-elo">
+                                    " — "
+                                    {Model::Random.elo_label()}
+                                </span>
+                            </option>
+                            <option value="minimax-depth-3">
+                                <span>"Minimax · depth 3"</span>
+                                <span class="bot-option-elo">
+                                    " — "
+                                    {Model::MinimaxDepth3.elo_label()}
+                                </span>
+                            </option>
+                            <option value="minimax-9-seconds">
+                                <span>"Minimax · 9 seconds"</span>
+                                <span class="bot-option-elo">
+                                    " — "
+                                    {Model::MinimaxNineSeconds.elo_label()}
+                                </span>
+                            </option>
+                        </select>
                         <p class="bot-note">{move || selected_model.get().note()}</p>
                         <a class="about-link" href="#about-model">
                             "About "
@@ -826,22 +817,10 @@ mod tests {
     }
 
     #[test]
-    fn model_labels_include_elo_and_confidence() {
+    fn model_labels_include_elo() {
         assert_eq!(Model::Random.elo_label(), "<400 Elo");
-        assert_eq!(
-            Model::Random.confidence_interval(),
-            "95% CI: below 400 (both endpoints censored)"
-        );
         assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1675 Elo");
-        assert_eq!(
-            Model::MinimaxDepth3.confidence_interval(),
-            "95% CI: 1572 to 1748"
-        );
         assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2050 Elo");
-        assert_eq!(
-            Model::MinimaxNineSeconds.confidence_interval(),
-            "95% CI: 1889 to at least 2199"
-        );
     }
 
     #[test]
