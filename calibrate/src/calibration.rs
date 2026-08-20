@@ -291,6 +291,7 @@ mod tests {
             actor_username: format!("player-{game}"),
             actor_rating: rating,
             ply: 20,
+            uci_prefix: Vec::new(),
             fen: "fen".to_string(),
             human_move: "e2e4".to_string(),
             bot_move: "d2d4".to_string(),

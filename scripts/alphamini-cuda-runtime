@@ -1,0 +1,12 @@
+#!/usr/bin/env python3
+"""Repository entry point for the isolated Rust ORT CUDA runtime."""
+
+from pathlib import Path
+import sys
+
+REPOSITORY = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPOSITORY / "alphamini-train/src"))
+
+from alphamini_train.cuda_runtime import main  # noqa: E402
+
+raise SystemExit(main())

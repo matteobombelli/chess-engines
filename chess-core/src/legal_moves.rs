@@ -17,6 +17,7 @@ pub enum Status {
     Ongoing,
     Checkmate,
     Stalemate,
+    InsufficientMaterial,
     ThreefoldRepetition,
     FiftyMoveRule,
 }
@@ -45,15 +46,17 @@ impl Board {
     }
 
     /// Apply a move to the Board without recording it
-    fn apply_move(&mut self, mv: Move) {
+    pub(crate) fn apply_move(&mut self, mv: Move) {
         let color: Color = mv.piece.color;
         let from: Square = mv.start_square;
         let to: Square = mv.end_square;
 
-        // Remember the en-passant target before we overwrite it below
-        let ep_target: Option<Square> = self.en_passant;
-        let is_capture: bool = self.piece_at(to).is_some()
-            || (mv.piece.kind == PieceKind::Pawn && Some(to) == ep_target);
+        // Resolve en passant before overwriting the target below. Move
+        // generation and both repetition-key implementations use this same
+        // structural predicate, so malformed public Board state cannot make
+        // their interpretations drift apart.
+        let en_passant_capture = self.en_passant_capture_square(mv.piece, from, to);
+        let is_capture: bool = self.piece_at(to).is_some() || en_passant_capture.is_some();
 
         // Lift the moving piece off its start square
         self.set_piece(from, None);
@@ -62,8 +65,8 @@ impl Board {
             PieceKind::Pawn => {
                 // En-passant capture: a diagonal step onto the en-passant target
                 // takes the pawn that just double-pushed, sitting behind `to`
-                if Some(to) == ep_target && from.file() != to.file() {
-                    self.set_piece(Square::new(to.file(), from.rank()), None);
+                if let Some(captured_pawn) = en_passant_capture {
+                    self.set_piece(captured_pawn, None);
                 }
 
                 // Promotion: a pawn reaching the back rank becomes the chosen
@@ -146,6 +149,106 @@ impl Board {
         self.side_to_move = color.opposite();
     }
 
+    /// Return the en-passant target and captured-pawn square when the raw Board
+    /// state describes a structurally valid right for the side to move.
+    ///
+    /// This deliberately does not test whether an adjacent friendly pawn exists
+    /// or whether moving it would expose its king. Those move-specific checks
+    /// are layered on top by `en_passant_capture_square` and
+    /// `effective_en_passant_target` respectively.
+    fn structurally_valid_en_passant(&self) -> Option<(Square, Square)> {
+        let target = self.en_passant?;
+        let expected_rank = match self.side_to_move {
+            Color::White => 5,
+            Color::Black => 2,
+        };
+        if target.rank() != expected_rank || self.piece_at(target).is_some() {
+            return None;
+        }
+
+        let captured_pawn_rank = match self.side_to_move {
+            Color::White => target.rank().checked_sub(1)?,
+            Color::Black => target.rank().checked_add(1).filter(|rank| *rank < 8)?,
+        };
+        let captured_pawn = Square::new(target.file(), captured_pawn_rank);
+        if self.piece_at(captured_pawn)
+            != Some(Piece {
+                color: self.side_to_move.opposite(),
+                kind: PieceKind::Pawn,
+            })
+        {
+            return None;
+        }
+
+        Some((target, captured_pawn))
+    }
+
+    /// Return the captured-pawn square when `(piece, from, to)` is a
+    /// structurally valid en-passant capture in this position.
+    pub(crate) fn en_passant_capture_square(
+        &self,
+        piece: Piece,
+        from: Square,
+        to: Square,
+    ) -> Option<Square> {
+        if piece
+            != (Piece {
+                color: self.side_to_move,
+                kind: PieceKind::Pawn,
+            })
+        {
+            return None;
+        }
+        let (target, captured_pawn) = self.structurally_valid_en_passant()?;
+        (to == target
+            && from.rank() == captured_pawn.rank()
+            && from.file().abs_diff(target.file()) == 1)
+            .then_some(captured_pawn)
+    }
+
+    /// Return the en-passant target only when at least one legal capture uses
+    /// it. This is the shared FIDE repetition-identity interpretation used by
+    /// both Board's string key and SearchPosition's Zobrist key.
+    pub(crate) fn effective_en_passant_target(&self) -> Option<Square> {
+        let (target, captured_pawn) = self.structurally_valid_en_passant()?;
+        let moving_side = self.side_to_move;
+        let pawn = Piece {
+            color: moving_side,
+            kind: PieceKind::Pawn,
+        };
+
+        for file_delta in [-1i8, 1] {
+            let from_file = target.file() as i8 + file_delta;
+            if !(0..8).contains(&from_file) {
+                continue;
+            }
+            let from = Square::new(from_file as u8, captured_pawn.rank());
+            if self.piece_at(from) != Some(pawn)
+                || self.en_passant_capture_square(pawn, from, target) != Some(captured_pawn)
+            {
+                continue;
+            }
+
+            let mut next = self.clone();
+            next.san_history.clear();
+            next.position_history.clear();
+            next.apply_move(Move {
+                piece: pawn,
+                start_square: from,
+                end_square: target,
+                promotion: None,
+            });
+            if next
+                .find_king(moving_side)
+                .is_some_and(|king| !next.is_attacked(king, moving_side.opposite()))
+            {
+                return Some(target);
+            }
+        }
+
+        None
+    }
+
     /// Get all legal moves from the current board position
     pub fn get_legal_moves(&self) -> Vec<Move> {
         let me: Color = self.side_to_move;
@@ -184,15 +287,55 @@ impl Board {
             };
         }
 
+        if self.has_insufficient_material() {
+            return Status::InsufficientMaterial;
+        }
+
         if self.halfmove_clock >= 100 {
             return Status::FiftyMoveRule;
         }
 
-        if self.current_position_repetitions() >= 3 {
+        if self.current_position_repetition_count() >= 3 {
             return Status::ThreefoldRepetition;
         }
 
         Status::Ongoing
+    }
+
+    /// Conservative FIDE dead-position cases that depend only on material:
+    /// bare kings, a single bishop/knight, or bishops confined to one color.
+    /// Positions with pawns, rooks, queens, or multiple knight colors remain
+    /// playable because some legal continuation can still end in checkmate.
+    pub fn has_insufficient_material(&self) -> bool {
+        let mut minor_count = 0;
+        let mut knight_count = 0;
+        let mut bishop_square_color = None;
+        for (index, piece) in self.squares.iter().enumerate() {
+            let Some(piece) = piece else {
+                continue;
+            };
+            match piece.kind {
+                PieceKind::King => {}
+                PieceKind::Pawn | PieceKind::Rook | PieceKind::Queen => return false,
+                PieceKind::Knight => {
+                    minor_count += 1;
+                    knight_count += 1;
+                }
+                PieceKind::Bishop => {
+                    minor_count += 1;
+                    let square = Square(index as u8);
+                    let color = (square.file() + square.rank()) % 2;
+                    if bishop_square_color.is_some_and(|existing| existing != color) {
+                        bishop_square_color = Some(2);
+                    } else if bishop_square_color.is_none() {
+                        bishop_square_color = Some(color);
+                    }
+                }
+            }
+        }
+        minor_count == 0
+            || minor_count == 1
+            || (knight_count == 0 && bishop_square_color.is_some_and(|color| color < 2))
     }
 
     pub(crate) fn reset_position_history(&mut self) {
@@ -204,7 +347,8 @@ impl Board {
         self.position_history.push(self.current_position_key());
     }
 
-    fn current_position_repetitions(&self) -> usize {
+    /// Number of occurrences of the current repetition position, including now.
+    pub fn current_position_repetition_count(&self) -> usize {
         let Some(current) = self.position_history.last() else {
             return 0;
         };
@@ -214,12 +358,17 @@ impl Board {
             .count()
     }
 
+    /// Number of earlier occurrences of the current repetition position.
+    pub fn prior_repetition_count(&self) -> usize {
+        self.current_position_repetition_count().saturating_sub(1)
+    }
+
     /// Piece placement, side to move, castling rights, and any en-passant right
     /// that changes the legal moves are the only inputs to repetition identity.
     fn current_position_key(&self) -> String {
         let fen = self.to_fen();
         let fields: Vec<&str> = fen.split_whitespace().collect();
-        let en_passant = if self.has_legal_en_passant_capture() {
+        let en_passant = if self.effective_en_passant_target().is_some() {
             fields[3]
         } else {
             "-"
@@ -227,21 +376,17 @@ impl Board {
         format!("{} {} {} {}", fields[0], fields[1], fields[2], en_passant)
     }
 
-    fn has_legal_en_passant_capture(&self) -> bool {
-        let Some(target) = self.en_passant else {
-            return false;
-        };
-        self.get_legal_moves().into_iter().any(|mv| {
-            mv.piece.kind == PieceKind::Pawn
-                && mv.end_square == target
-                && mv.start_square.file() != target.file()
-        })
-    }
-
     /// All pseudo-legal moves for the side to move, ignoring whether they leave
     /// our own king in check
     fn pseudo_legal_moves(&self) -> Vec<Move> {
         let mut moves: Vec<Move> = Vec::new();
+        self.pseudo_legal_moves_into(&mut moves);
+        moves
+    }
+
+    /// Fill a reusable buffer with pseudo-legal moves.
+    pub(crate) fn pseudo_legal_moves_into(&self, moves: &mut Vec<Move>) {
+        moves.clear();
         for rank in 0..8 {
             for file in 0..8 {
                 let from: Square = Square::new(file, rank);
@@ -250,23 +395,18 @@ impl Board {
                     _ => continue,
                 };
                 match piece.kind {
-                    PieceKind::Pawn => self.gen_pawn_moves(from, piece, &mut moves),
-                    PieceKind::Knight => {
-                        self.gen_step_moves(from, piece, &KNIGHT_OFFSETS, &mut moves)
-                    }
-                    PieceKind::Bishop => {
-                        self.gen_slide_moves(from, piece, &BISHOP_DIRS, &mut moves)
-                    }
-                    PieceKind::Rook => self.gen_slide_moves(from, piece, &ROOK_DIRS, &mut moves),
-                    PieceKind::Queen => self.gen_slide_moves(from, piece, &QUEEN_DIRS, &mut moves),
+                    PieceKind::Pawn => self.gen_pawn_moves(from, piece, moves),
+                    PieceKind::Knight => self.gen_step_moves(from, piece, &KNIGHT_OFFSETS, moves),
+                    PieceKind::Bishop => self.gen_slide_moves(from, piece, &BISHOP_DIRS, moves),
+                    PieceKind::Rook => self.gen_slide_moves(from, piece, &ROOK_DIRS, moves),
+                    PieceKind::Queen => self.gen_slide_moves(from, piece, &QUEEN_DIRS, moves),
                     PieceKind::King => {
-                        self.gen_step_moves(from, piece, &KING_OFFSETS, &mut moves);
-                        self.gen_castling_moves(from, piece, &mut moves);
+                        self.gen_step_moves(from, piece, &KING_OFFSETS, moves);
+                        self.gen_castling_moves(from, piece, moves);
                     }
                 }
             }
         }
-        moves
     }
 
     /// Generate single-step moves (knight, king) from a list of offsets
@@ -366,7 +506,8 @@ impl Board {
                     Some(target) => target.color != piece.color,
                     None => false,
                 };
-                if is_enemy || Some(to) == self.en_passant {
+                let is_en_passant = self.en_passant_capture_square(piece, from, to).is_some();
+                if is_enemy || is_en_passant {
                     push_pawn_move(piece, from, to, moves);
                 }
             }
@@ -393,6 +534,11 @@ impl Board {
 
         // Kingside: f and g empty, and the king never crosses an attacked square
         if kingside
+            && self.piece_at(Square::new(7, rank))
+                == Some(Piece {
+                    color: piece.color,
+                    kind: PieceKind::Rook,
+                })
             && self.piece_at(Square::new(5, rank)).is_none()
             && self.piece_at(Square::new(6, rank)).is_none()
             && !self.is_attacked(Square::new(5, rank), enemy)
@@ -408,6 +554,11 @@ impl Board {
 
         // Queenside: b, c, d empty, and the king never crosses an attacked square
         if queenside
+            && self.piece_at(Square::new(0, rank))
+                == Some(Piece {
+                    color: piece.color,
+                    kind: PieceKind::Rook,
+                })
             && self.piece_at(Square::new(1, rank)).is_none()
             && self.piece_at(Square::new(2, rank)).is_none()
             && self.piece_at(Square::new(3, rank)).is_none()
@@ -424,7 +575,7 @@ impl Board {
     }
 
     /// Find the square of a given color's king, if one is on the board
-    fn find_king(&self, color: Color) -> Option<Square> {
+    pub(crate) fn find_king(&self, color: Color) -> Option<Square> {
         for rank in 0..8 {
             for file in 0..8 {
                 let sq: Square = Square::new(file, rank);
@@ -442,7 +593,7 @@ impl Board {
     }
 
     /// Whether `sq` is attacked by any piece of color `by`
-    fn is_attacked(&self, sq: Square, by: Color) -> bool {
+    pub(crate) fn is_attacked(&self, sq: Square, by: Color) -> bool {
         // Pawns: a `by`-colored pawn attacking `sq` sits one rank toward its own
         // side, so we look back down its capture diagonals
         let pawn_dir: i8 = match by {
@@ -732,6 +883,8 @@ mod tests {
         }
 
         assert_eq!(board.status(), Status::ThreefoldRepetition);
+        assert_eq!(board.current_position_repetition_count(), 3);
+        assert_eq!(board.prior_repetition_count(), 2);
     }
 
     #[test]
@@ -743,6 +896,31 @@ mod tests {
         board.san_to_move("Rb1").expect("rook move should be legal");
         assert_eq!(board.halfmove_clock, 100);
         assert_eq!(board.status(), Status::FiftyMoveRule);
+    }
+
+    #[test]
+    fn detects_only_conservative_insufficient_material_positions() {
+        for fen in [
+            "4k3/8/8/8/8/8/8/4K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/2B1K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/2N1K3 w - - 0 1",
+            "4kb2/8/8/8/8/8/8/2B1K3 w - - 0 1",
+        ] {
+            let board = Board::from_fen(fen).unwrap();
+            assert!(board.has_insufficient_material(), "{fen}");
+            assert_eq!(board.status(), Status::InsufficientMaterial, "{fen}");
+        }
+
+        for fen in [
+            "2b1k3/8/8/8/8/8/8/2B1K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/1NB1K3 w - - 0 1",
+            "4k3/8/8/8/8/8/P7/4K3 w - - 0 1",
+            "4k3/8/8/8/8/8/8/1NN1K3 w - - 0 1",
+        ] {
+            let board = Board::from_fen(fen).unwrap();
+            assert!(!board.has_insufficient_material(), "{fen}");
+            assert_eq!(board.status(), Status::Ongoing, "{fen}");
+        }
     }
 
     #[test]
@@ -781,6 +959,9 @@ mod tests {
             Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1").expect("FEN should parse");
         let same_without_target =
             Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
+        let occupied_target = Board::from_fen("4k3/8/3n4/3pP3/8/8/8/4K3 w - d6 0 1").unwrap();
+        let occupied_without_target =
+            Board::from_fen("4k3/8/3n4/3pP3/8/8/8/4K3 w - - 0 1").unwrap();
 
         assert_eq!(
             without_target.current_position_key(),
@@ -790,5 +971,195 @@ mod tests {
             capturable_target.current_position_key(),
             same_without_target.current_position_key()
         );
+        assert_eq!(
+            occupied_target.current_position_key(),
+            occupied_without_target.current_position_key()
+        );
+    }
+
+    #[test]
+    fn stale_castling_rights_cannot_materialize_a_rook() {
+        let no_rooks = Board::from_fen("4k3/8/8/8/8/8/8/4K3 w KQ - 0 1").unwrap();
+        let legal = no_rooks.legal_uci_moves();
+        assert!(!legal.contains(&"e1g1".to_string()));
+        assert!(!legal.contains(&"e1c1".to_string()));
+
+        let enemy_rooks = Board::from_fen("4k3/8/8/8/8/8/8/r3K2r w KQ - 0 1").unwrap();
+        let legal = enemy_rooks.legal_uci_moves();
+        assert!(!legal.contains(&"e1g1".to_string()));
+        assert!(!legal.contains(&"e1c1".to_string()));
+    }
+
+    #[test]
+    fn malformed_en_passant_target_cannot_capture_a_missing_pawn() {
+        let missing_pawn = Board::from_fen("4k3/8/8/4P3/8/8/8/4K3 w - d6 0 1").unwrap();
+        assert!(!missing_pawn.legal_uci_moves().contains(&"e5d6".to_string()));
+
+        let occupied_target = Board::from_fen("4k3/8/3n4/3pP3/8/8/8/4K3 w - d6 0 1").unwrap();
+        // This is a normal capture of the knight on d6. Applying it must not
+        // also remove the pawn on d5 as though it were en passant.
+        let mut after = occupied_target.clone();
+        after.uci_to_move("e5d6").unwrap();
+        assert_eq!(
+            after.piece_at(Square::new(3, 4)),
+            Some(Piece {
+                color: Color::Black,
+                kind: PieceKind::Pawn,
+            })
+        );
+
+        // Public Board state can be assembled without the FEN parser, so move
+        // generation also rejects a target on an impossible rank.
+        let mut wrong_rank = Board::from_fen("4k3/8/8/8/8/3Pp3/8/4K3 w - - 0 1").unwrap();
+        wrong_rank.en_passant = Some(Square::new(4, 3));
+        assert!(!wrong_rank.legal_uci_moves().contains(&"d3e4".to_string()));
+    }
+
+    #[test]
+    fn board_and_search_share_en_passant_legality_and_identity() {
+        struct Case {
+            name: &'static str,
+            board: Board,
+            structurally_valid: bool,
+            legal_capture: Option<&'static str>,
+        }
+
+        let mut wrong_rank = Board::from_fen("4k3/8/8/8/8/3Pp3/8/4K3 w - - 0 1").unwrap();
+        wrong_rank.en_passant = Some(Square::new(4, 3));
+        wrong_rank.reset_position_history();
+
+        let cases = [
+            Case {
+                name: "valid white capture",
+                board: Board::from_fen("4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: true,
+                legal_capture: Some("e5d6"),
+            },
+            Case {
+                name: "valid black capture",
+                board: Board::from_fen("4k3/8/8/8/3Pp3/8/8/4K3 b - d3 0 1").unwrap(),
+                structurally_valid: true,
+                legal_capture: Some("e4d3"),
+            },
+            Case {
+                name: "missing captured pawn",
+                board: Board::from_fen("4k3/8/8/4P3/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: false,
+                legal_capture: None,
+            },
+            Case {
+                name: "occupied target",
+                board: Board::from_fen("4k3/8/3n4/3pP3/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: false,
+                legal_capture: None,
+            },
+            Case {
+                name: "wrong target rank",
+                board: wrong_rank,
+                structurally_valid: false,
+                legal_capture: None,
+            },
+            Case {
+                name: "wrong captured piece kind",
+                board: Board::from_fen("4k3/8/8/3nP3/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: false,
+                legal_capture: None,
+            },
+            Case {
+                name: "capturing pawn is pinned",
+                board: Board::from_fen("4r1k1/8/8/3pP3/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: true,
+                legal_capture: None,
+            },
+            Case {
+                name: "no adjacent capturing pawn",
+                board: Board::from_fen("4k3/8/8/3p4/8/8/8/4K3 w - d6 0 1").unwrap(),
+                structurally_valid: true,
+                legal_capture: None,
+            },
+        ];
+
+        for Case {
+            name,
+            board,
+            structurally_valid,
+            legal_capture,
+        } in cases
+        {
+            assert_eq!(
+                board.structurally_valid_en_passant().is_some(),
+                structurally_valid,
+                "{name}: structural validity"
+            );
+
+            let board_moves = board.get_legal_moves();
+            let board_en_passant_moves: Vec<Move> = board_moves
+                .iter()
+                .copied()
+                .filter(|mv| {
+                    board
+                        .en_passant_capture_square(mv.piece, mv.start_square, mv.end_square)
+                        .is_some()
+                })
+                .collect();
+            assert_eq!(
+                board_en_passant_moves.len(),
+                usize::from(legal_capture.is_some()),
+                "{name}: legal en-passant count"
+            );
+            if let Some(uci) = legal_capture {
+                assert_eq!(
+                    board.move_from_uci(uci),
+                    Ok(*board_en_passant_moves
+                        .first()
+                        .expect("expected en-passant move must exist")),
+                    "{name}: expected legal en-passant move"
+                );
+            }
+
+            let mut search = crate::SearchPosition::from_board(&board);
+            assert_eq!(search.legal_moves(), board_moves, "{name}: legal moves");
+            assert_eq!(search.status(), board.status(), "{name}: status");
+
+            let mut without_target = board.clone();
+            without_target.en_passant = None;
+            without_target.reset_position_history();
+            let board_identity_uses_target =
+                board.current_position_key() != without_target.current_position_key();
+            let search_identity_uses_target = search.position_key()
+                != crate::SearchPosition::from_board(&without_target).position_key();
+            assert_eq!(
+                board_identity_uses_target, search_identity_uses_target,
+                "{name}: Board/SearchPosition identity parity"
+            );
+            assert_eq!(
+                board_identity_uses_target,
+                legal_capture.is_some(),
+                "{name}: only a legal capture affects repetition identity"
+            );
+            assert_eq!(
+                board.effective_en_passant_target().is_some(),
+                legal_capture.is_some(),
+                "{name}: effective target"
+            );
+
+            if let Some(mv) = board_en_passant_moves.first().copied() {
+                let mut board_after = board.clone();
+                board_after.make_search_move(mv);
+                let undo = search.make_move(mv);
+                assert_eq!(search.squares(), &board_after.squares, "{name}: pieces");
+                assert_eq!(
+                    search.position_key(),
+                    crate::SearchPosition::from_board(&board_after).position_key(),
+                    "{name}: post-capture identity"
+                );
+                search.unmake_move(undo);
+                assert_eq!(
+                    search,
+                    crate::SearchPosition::from_board(&board),
+                    "{name}: reversible search state"
+                );
+            }
+        }
     }
 }

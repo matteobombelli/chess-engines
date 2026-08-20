@@ -3,10 +3,17 @@ name = "calibrate"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+alphamini = ["dep:alphamini", "arena/alphamini", "alphamini/onnx"]
+
 [dependencies]
+alphamini = { path = "../alphamini", optional = true, default-features = false }
 arena = { path = "../arena" }
+artifact-io = { path = "../artifact-io" }
 chess-core = { path = "../chess-core" }
 minimax = { path = "../minimax" }
 rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha2 = "0.10"

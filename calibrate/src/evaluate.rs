@@ -77,8 +77,23 @@ pub fn evaluate_sample(
     stockfish: &mut Stockfish,
     config: EvaluationConfig,
 ) -> Result<Option<AnalysisRow>, String> {
-    let board = Board::from_fen(&sample.fen)
-        .map_err(|error| format!("bad sample FEN in {}: {error}", sample.game_id))?;
+    let board = if sample.uci_prefix.is_empty() {
+        // Backward-compatible path for old serialized PositionSample fixtures.
+        Board::from_fen(&sample.fen)
+            .map_err(|error| format!("bad sample FEN in {}: {error}", sample.game_id))?
+    } else {
+        let replayed = Board::import_uci(&sample.uci_prefix)
+            .map_err(|error| format!("bad sample UCI prefix in {}: {error}", sample.game_id))?;
+        if replayed.to_fen() != sample.fen {
+            return Err(format!(
+                "sample UCI/FEN mismatch in {}: replayed {}, stored {}",
+                sample.game_id,
+                replayed.to_fen(),
+                sample.fen
+            ));
+        }
+        replayed
+    };
     board
         .move_from_uci(&sample.human_move)
         .map_err(|error| format!("bad human move in {}: {error}", sample.game_id))?;
@@ -87,8 +102,11 @@ pub fn evaluate_sample(
     // second search. Human, bot, and reference moves consequently receive the
     // same node budget instead of the reference score sharing its budget across
     // every root move.
-    let reference_move = stockfish.analyze(&sample.fen, None)?.best_move;
-    let best_expected_score = stockfish.expected_score(&sample.fen, Some(&reference_move))?;
+    let reference_move = stockfish
+        .analyze(&sample.fen, &sample.uci_prefix, None)?
+        .best_move;
+    let best_expected_score =
+        stockfish.expected_score(&sample.fen, &sample.uci_prefix, Some(&reference_move))?;
     if best_expected_score < config.minimum_best_expected_score
         || best_expected_score > config.maximum_best_expected_score
     {
@@ -114,14 +132,14 @@ pub fn evaluate_sample(
     let human_expected_score = if sample.human_move == reference_move {
         best_expected_score
     } else {
-        stockfish.expected_score(&sample.fen, Some(&sample.human_move))?
+        stockfish.expected_score(&sample.fen, &sample.uci_prefix, Some(&sample.human_move))?
     };
     let bot_expected_score = if bot_move == reference_move {
         best_expected_score
     } else if bot_move == sample.human_move {
         human_expected_score
     } else {
-        stockfish.expected_score(&sample.fen, Some(&bot_move))?
+        stockfish.expected_score(&sample.fen, &sample.uci_prefix, Some(&bot_move))?
     };
 
     Ok(Some(AnalysisRow {
@@ -129,6 +147,7 @@ pub fn evaluate_sample(
         actor_username: sample.actor_username.clone(),
         actor_rating: sample.actor_rating,
         ply: sample.ply,
+        uci_prefix: sample.uci_prefix.clone(),
         fen: sample.fen.clone(),
         human_move: sample.human_move.clone(),
         bot_move,

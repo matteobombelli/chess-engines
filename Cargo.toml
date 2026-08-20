@@ -1,3 +1,12 @@
 [workspace]
 resolver = "3"
-members = ["frontend", "chess-core", "random", "minimax", "arena", "calibrate"]
+members = [
+    "frontend",
+    "chess-core",
+    "random",
+    "minimax",
+    "arena",
+    "calibrate",
+    "alphamini",
+    "artifact-io",
+]

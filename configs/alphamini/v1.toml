@@ -1,0 +1,66 @@
+schema = "alphamini.config.v1"
+
+[run]
+name = "alphamini-run-001"
+description = "First published pure-self-play AlphaMini run"
+seed = 1
+active_budget_hours = 72.0
+disposable = false
+
+[schemas]
+position_record = "position-record-v1"
+tensor_cache = "tensor-cache-manifest-v1"
+encoder = "encoder-v1"
+action = "policy-v1"
+model_manifest = "model-manifest-v1"
+
+[model]
+input_planes = 22
+action_size = 4672
+channels = 64
+residual_blocks = 6
+se_hidden = 8
+
+[self_play]
+games_per_cycle = 1024
+simulations = 128
+batch_size = 256
+max_plies = 512
+dirichlet_alpha = 0.3
+dirichlet_epsilon = 0.25
+sample_until_ply = 30
+cpuct = 1.5
+fpu_reduction = 0.25
+
+[training]
+batch_size = 512
+sample_ratio = 2.0
+replay_positions = 1000000
+validation_fraction = 0.05
+validation_batches = 64
+learning_rate = 0.001
+minimum_learning_rate = 0.0001
+warmup_fraction = 0.02
+# Frozen from the two-cycle RTX 3070 production benchmark after a conservative
+# haircut from the slower measured cycle's 72-active-hour projection.
+frozen_horizon_steps = 180000
+horizon_confirmed = true
+weight_decay = 0.0001
+gradient_clip = 1.0
+checkpoint_every_steps = 250
+device = "cuda"
+amp = true
+deterministic = true
+
+[export]
+opset = 17
+dtype = "float32"
+parity_atol = 0.0001
+parity_rtol = 0.001
+
+[operations]
+self_play_device = "cuda"
+collect_command = ["scripts/alphamini-cuda-runtime", "exec", "--", "cargo", "run", "--locked", "--release", "-p", "alphamini", "--bin", "alphamini-selfplay", "--features", "cuda", "--", "collect"]
+materialize_command = ["cargo", "run", "--locked", "--release", "-p", "alphamini", "--bin", "alphamini-selfplay", "--", "materialize"]
+heartbeat_seconds = 30
+command_timeout_seconds = 0

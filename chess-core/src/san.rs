@@ -23,10 +23,11 @@ impl Board {
             }
         }
 
-        // A capture is a move onto an occupied square, or a pawn onto the
-        // en-passant target
-        let is_capture: bool =
-            self.piece_at(to).is_some() || (kind == PieceKind::Pawn && Some(to) == self.en_passant);
+        // A capture is a move onto an occupied square or a structurally valid
+        // en-passant capture. Share the latter predicate with move application
+        // so malformed public Board state cannot produce misleading SAN.
+        let is_capture: bool = self.piece_at(to).is_some()
+            || self.en_passant_capture_square(mv.piece, from, to).is_some();
 
         let mut san = String::new();
 

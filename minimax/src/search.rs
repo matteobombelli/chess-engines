@@ -326,7 +326,10 @@ pub fn terminal_score(status: Status, ply: u16) -> Option<Score> {
         // The side to move has been checkmated, so the score is negative. Adding
         // ply prefers delivering mate sooner and receiving mate later.
         Status::Checkmate => Some(-MATE_SCORE + Score::from(ply)),
-        Status::Stalemate | Status::ThreefoldRepetition | Status::FiftyMoveRule => Some(0),
+        Status::Stalemate
+        | Status::InsufficientMaterial
+        | Status::ThreefoldRepetition
+        | Status::FiftyMoveRule => Some(0),
         Status::Ongoing => None,
     }
 }
@@ -398,6 +401,7 @@ mod tests {
     fn draw_score() {
         for status in [
             Status::Stalemate,
+            Status::InsufficientMaterial,
             Status::ThreefoldRepetition,
             Status::FiftyMoveRule,
         ] {

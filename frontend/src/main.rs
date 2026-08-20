@@ -12,6 +12,7 @@ enum Model {
     Random,
     MinimaxDepth3,
     MinimaxNineSeconds,
+    AlphaMini,
 }
 
 impl Model {
@@ -20,6 +21,7 @@ impl Model {
             Self::Random => "Random",
             Self::MinimaxDepth3 => "Depth-3 Minimax",
             Self::MinimaxNineSeconds => "9-second Minimax",
+            Self::AlphaMini => "AlphaMini",
         }
     }
 
@@ -28,6 +30,7 @@ impl Model {
             Self::Random => "Chooses a legal move at random.",
             Self::MinimaxDepth3 => "Searches three moves ahead and usually responds quickly.",
             Self::MinimaxNineSeconds => "Searches for up to nine seconds before each move.",
+            Self::AlphaMini => "Uses a compact neural network and Monte Carlo tree search.",
         }
     }
 
@@ -36,14 +39,16 @@ impl Model {
             Self::Random => "Random",
             Self::MinimaxDepth3 => "Minimax · depth 3",
             Self::MinimaxNineSeconds => "Minimax · 9 seconds",
+            Self::AlphaMini => "AlphaMini · Run 1",
         }
     }
 
     fn elo_label(self) -> &'static str {
         match self {
             Self::Random => "<400 Elo",
-            Self::MinimaxDepth3 => "≈1675 Elo",
+            Self::MinimaxDepth3 => "≈1640 Elo",
             Self::MinimaxNineSeconds => "≈2050 Elo",
+            Self::AlphaMini => "≈1970 Elo",
         }
     }
 
@@ -52,6 +57,7 @@ impl Model {
             Self::Random => "/projects/chessengines/api/random/move",
             Self::MinimaxDepth3 => "/projects/chessengines/api/minimax/depth-3/move",
             Self::MinimaxNineSeconds => "/projects/chessengines/api/minimax/move",
+            Self::AlphaMini => "/projects/chessengines/api/alphamini/move",
         }
     }
 }
@@ -368,7 +374,12 @@ fn App() -> impl IntoView {
                                 </span>
                             </summary>
                             <div class="bot-options" aria-labelledby="opponent-label">
-                                {[Model::Random, Model::MinimaxDepth3, Model::MinimaxNineSeconds]
+                                {[
+                                    Model::Random,
+                                    Model::MinimaxDepth3,
+                                    Model::MinimaxNineSeconds,
+                                    Model::AlphaMini,
+                                ]
                                     .into_iter()
                                     .map(|model| view! {
                                         <button
@@ -501,7 +512,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 1675 Chess.com Elo. The 95% player-bootstrap CI is 1572 to 1748. It did not play full games on Chess.com."
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 1640 Chess.com Elo. The 95% whole-player bootstrap interval is at or below 1400 to 1780; its lower endpoint is censored by the calibrated range. It did not play full games on Chess.com."
                                 </p>
                             </article>
                         </div>
@@ -536,6 +547,40 @@ fn App() -> impl IntoView {
                                 <h3>"Rating"</h3>
                                 <p>
                                     "On historical 30+0 positions, its move quality was closest to players rated around 2050 Chess.com Elo. The 95% player-bootstrap CI starts at 1889. Its upper endpoint is at or above 2199, the highest well-populated rating group."
+                                </p>
+                            </article>
+                        </div>
+                    </section>
+                },
+                Model::AlphaMini => view! {
+                    <section class="about-model" id="about-model" aria-labelledby="about-model-title">
+                        <div class="about-heading">
+                            <div>
+                                <p class="eyebrow">"ABOUT THE ENGINE"</p>
+                                <h2 id="about-model-title">"AlphaMini"</h2>
+                            </div>
+                            <p class="about-intro">
+                                "AlphaMini learns only from self-play. A compact convolutional network predicts promising moves and the likely result, while Monte Carlo tree search tests those predictions against the legal replies."
+                            </p>
+                        </div>
+
+                        <div class="about-details">
+                            <article>
+                                <h3>"Search"</h3>
+                                <p>
+                                    "Rust generates every legal move and searches a tree for up to nine seconds. The neural network ranks positions; it never invents or directly applies a move."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Training"</h3>
+                                <p>
+                                    "The deployed network trained for 72 hours of seeded, versioned self-play on one RTX 3070. Checkpoints, data shards, software versions, and interrupted-run recovery state are recorded so training can be audited and continued."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Rating"</h3>
+                                <p>
+                                    "On historical 30+0 positions, its move quality was closest to players rated around 1970 Chess.com Elo. The 95% player-bootstrap CI starts at 1758; its upper endpoint is at or above 1999. An independent sample of players rated 1700 and up agreed, crossing in the same band. It did not play full games on Chess.com."
                                 </p>
                             </article>
                         </div>
@@ -765,6 +810,7 @@ fn status_text(board: &Board, thinking: bool, player_color: Color) -> &'static s
             Status::Checkmate if board.side_to_move == player_color => "Checkmate - Bot wins",
             Status::Checkmate => "Checkmate - You win",
             Status::Stalemate => "Draw by stalemate",
+            Status::InsufficientMaterial => "Draw by insufficient material",
             Status::ThreefoldRepetition => "Draw by threefold repetition",
             Status::FiftyMoveRule => "Draw by the 50-move rule",
             Status::Ongoing if board.is_in_check() => "Your king is in check",
@@ -823,8 +869,13 @@ mod tests {
     #[test]
     fn model_labels_include_elo() {
         assert_eq!(Model::Random.elo_label(), "<400 Elo");
-        assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1675 Elo");
+        assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1640 Elo");
         assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2050 Elo");
+        assert_eq!(Model::AlphaMini.elo_label(), "≈1970 Elo");
+        assert_eq!(
+            Model::AlphaMini.url(),
+            "/projects/chessengines/api/alphamini/move"
+        );
     }
 
     #[test]

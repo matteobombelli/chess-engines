@@ -51,6 +51,18 @@ impl Board {
             "-" => None,
             _ => Some(square_from_str(fields[3])?),
         };
+        if let Some(target) = board.en_passant {
+            let expected_rank = match board.side_to_move {
+                Color::White => 5,
+                Color::Black => 2,
+            };
+            if target.rank() != expected_rank {
+                return Err(format!(
+                    "invalid en-passant target for side to move: {}",
+                    fields[3]
+                ));
+            }
+        }
 
         // Field 5: Half-move clock (Moves since the last pawn advance or capture)
         board.halfmove_clock = fields[4]
@@ -259,5 +271,11 @@ mod tests {
         let board = Board::from_fen(start).expect("start FEN should parse");
 
         assert_eq!(board.to_fen(), start);
+    }
+
+    #[test]
+    fn rejects_en_passant_target_on_an_impossible_rank() {
+        assert!(Board::from_fen("4k3/8/8/8/4p3/3P4/8/4K3 w - e4 0 1").is_err());
+        assert!(Board::from_fen("4k3/8/3p4/4P3/8/8/8/4K3 b - d5 0 1").is_err());
     }
 }

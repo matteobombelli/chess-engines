@@ -18,3 +18,7 @@ backend = "http://127.0.0.1:3001/"
 [[proxy]]
 rewrite = "/projects/chessengines/api/minimax/"
 backend = "http://127.0.0.1:3002/"
+
+[[proxy]]
+rewrite = "/projects/chessengines/api/alphamini/"
+backend = "http://127.0.0.1:3006/"

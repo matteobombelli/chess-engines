@@ -6,16 +6,35 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Duration;
 
+#[cfg(feature = "alphamini")]
+use alphamini::SearchConfig;
+#[cfg(feature = "alphamini")]
+use arena::AlphaMiniEngine;
 use arena::{Engine, MinimaxEngine, RandomEngine};
+use artifact_io::publish_bytes_new;
+use calibrate::artifact::{
+    stable_player_hash, validate_analysis_artifact, validate_analysis_artifacts,
+};
+use calibrate::attestation::{PostHocAttestationInputV2, attest_legacy_v2_artifact};
 use calibrate::calibration::{CalibrationConfig, RatingEstimate, calibrate};
 use calibrate::collect::{CollectConfig, collect};
 use calibrate::evaluate::{EvaluationConfig, evaluate_samples};
+use calibrate::identity::{
+    aggregate_corpus_sha256, analysis_config_sha256, sha256_file_hex, sha256_paths,
+};
 use calibrate::pgn::{ChessComGame, SampleConfig, sample_game};
 use calibrate::stockfish::Stockfish;
-use calibrate::{AnalysisArtifact, AnalysisMetadata};
+use calibrate::{
+    ANALYSIS_FORMAT_V2, ANALYSIS_TARGET_V2, AnalysisArtifact, AnalysisBotV2, AnalysisExperimentV2,
+    AnalysisMetadata, AnalysisReferenceV2, AnalysisSamplingV2, PLAYER_SHARD_SCHEMA_V1,
+};
 use minimax::SearchLimits;
 use rand::SeedableRng;
 use rand::rngs::StdRng;
+
+const ALPHAMINI_CPU_EVALUATOR_V1: &str = "onnxruntime-cpu-v1";
+const ALPHAMINI_CPUCT_PPM: u32 = 1_500_000;
+const ALPHAMINI_FPU_REDUCTION_PPM: u32 = 250_000;
 
 const HELP: &str = "\
 Estimate a bot's Chess.com 30+0 move-quality-equivalent rating.\n\
@@ -23,6 +42,7 @@ Estimate a bot's Chess.com 30+0 move-quality-equivalent rating.\n\
 Usage:\n\
   calibrate collect --output FILE --seed-user NAME [OPTIONS]\n\
   calibrate analyze --corpus FILE [--corpus FILE ...] --output FILE --bot BOT [OPTIONS]\n\
+  calibrate attest-v2 --analysis FILE --output FILE --experiment FILE [OPTIONS]\n\
   calibrate report --analysis FILE [--analysis FILE ...] [OPTIONS]\n\
 \n\
 Run `calibrate COMMAND --help` for command-specific options.\n";
@@ -51,11 +71,16 @@ Options:\n\
   --corpus FILE       JSONL file produced by collect; repeatable (required)\n\
   --exclude-corpus FILE  Exclude humans found in this corpus; repeatable\n\
   --output FILE       New JSON analysis artifact (required)\n\
-  --bot BOT           random or minimax (required)\n\
+  --bot BOT           random, minimax, or alphamini (required)\n\
   --minimax-depth N   Fixed depth when no time budget is set (default: 3)\n\
   --minimax-time-ms N Per-move Minimax budget; e.g. 9000 for production\n\
   --minimax-max-depth N  Timed-search depth ceiling (default: 64)\n\
   --bot-seed N        Seed for Random bot (default: 1)\n\
+  --alphamini-model FILE     Versioned ONNX model for --bot alphamini\n\
+  --alphamini-manifest FILE  Matching checksum/schema manifest\n\
+  --alphamini-simulations N  Per-position simulation cap (default: 10000)\n\
+  --alphamini-time-ms N      Per-position wall-clock cap (default: 9000)\n\
+  --alphamini-batch-size N   Leaf inference batch (default: 8)\n\
   --stockfish PATH    UCI engine path (default: /usr/games/stockfish)\n\
   --nodes N           Stockfish nodes per search (default: 100000)\n\
   --hash-mb N         Stockfish hash size in MiB (default: 128)\n\
@@ -85,6 +110,21 @@ Options:\n\
   --bootstrap N       Whole-player bootstrap repetitions (default: 1000)\n\
   --seed N            Bootstrap seed (default: 1)\n";
 
+const ATTEST_V2_HELP: &str = "\
+Seal an early replay-capable v2 artifact from contemporaneously captured evidence.\n\
+The source is never changed and the output is created with no-overwrite semantics.\n\
+\n\
+Usage: calibrate attest-v2 --analysis FILE --output FILE --experiment FILE [OPTIONS]\n\
+\n\
+Options:\n\
+  --analysis FILE     Exact early-v2 source artifact (required)\n\
+  --output FILE       New sealed artifact; never overwritten (required)\n\
+  --experiment FILE   Full AnalysisExperimentV2 identity JSON (required)\n\
+  --shard-index N     Captured zero-based shard index (required)\n\
+  --source-sha256 HEX Expected SHA-256 of exact source artifact bytes (required)\n\
+  --capture-manifest FILE  Contemporaneous run-evidence JSON (required)\n\
+  --capture-sha256 HEX     Expected SHA-256 of exact evidence bytes (required)\n";
+
 fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
@@ -105,6 +145,7 @@ fn run() -> Result<(), String> {
     match command.as_str() {
         "collect" => run_collect(&args),
         "analyze" => run_analyze(&args),
+        "attest-v2" => run_attest_v2(&args),
         "report" => run_report(&args),
         "-h" | "--help" => {
             print!("{HELP}");
@@ -186,6 +227,11 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
         "minimax-time-ms",
         "minimax-max-depth",
         "bot-seed",
+        "alphamini-model",
+        "alphamini-manifest",
+        "alphamini-simulations",
+        "alphamini-time-ms",
+        "alphamini-batch-size",
         "stockfish",
         "nodes",
         "hash-mb",
@@ -214,12 +260,19 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
         .into_iter()
         .map(PathBuf::from)
         .collect();
+    let corpus_sha256 = sha256_paths(&corpus_paths)?;
+    let exclude_corpus_sha256 = sha256_paths(&exclude_corpus_paths)?;
     let output_path = parsed.required_path("output")?;
     let bot_kind = parsed.required("bot")?;
     let minimax_depth = parsed.value_or("minimax-depth", 3_u8)?;
     let minimax_time_ms: Option<u64> = parsed.optional_value("minimax-time-ms")?;
     let minimax_max_depth = parsed.value_or("minimax-max-depth", 64_u8)?;
     let bot_seed = parsed.value_or("bot-seed", 1_u64)?;
+    let alphamini_model = parsed.one("alphamini-model").map(PathBuf::from);
+    let alphamini_manifest = parsed.one("alphamini-manifest").map(PathBuf::from);
+    let alphamini_simulations = parsed.value_or("alphamini-simulations", 10_000_u32)?;
+    let alphamini_time_ms = parsed.value_or("alphamini-time-ms", 9_000_u64)?;
+    let alphamini_batch_size = parsed.value_or("alphamini-batch-size", 8_usize)?;
     let stockfish_path = parsed
         .one("stockfish")
         .map(PathBuf::from)
@@ -227,6 +280,9 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     let nodes = parsed.value_or("nodes", 100_000_u64)?;
     let hash_mb = parsed.value_or("hash-mb", 128_u32)?;
     let positions_per_side = parsed.value_or("positions", 1_usize)?;
+    if positions_per_side == 0 {
+        return Err("--positions must be greater than zero".to_string());
+    }
     let positions_per_player = parsed.value_or("positions-per-player", 3_usize)?;
     if positions_per_player == 0 {
         return Err("--positions-per-player must be greater than zero".to_string());
@@ -236,8 +292,8 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     if analyzed_positions_per_player == 0 {
         return Err("--analyzed-positions-per-player must be greater than zero".to_string());
     }
-    let max_positions = parsed.value_or("max-positions", usize::MAX)?;
-    if max_positions == 0 {
+    let max_positions: Option<usize> = parsed.optional_value("max-positions")?;
+    if max_positions == Some(0) {
         return Err("--max-positions must be greater than zero".to_string());
     }
     let shard_count = parsed.value_or("shard-count", 1_u64)?;
@@ -251,13 +307,19 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
         return Err("--min-rating must not exceed --max-rating".to_string());
     }
     let min_ply = parsed.value_or("min-ply", 12_u16)?;
-    let max_ply = Some(parsed.value_or("max-ply", 60_u16)?);
+    let max_ply = parsed.value_or("max-ply", 60_u16)?;
+    if min_ply == 0 || min_ply > max_ply {
+        return Err("--min-ply must be positive and not exceed --max-ply".to_string());
+    }
     let sample_seed = parsed.value_or("sample-seed", 1_u64)?;
 
-    let (mut bot, bot_name): (Box<dyn Engine>, String) = match bot_kind.as_str() {
+    let (mut bot, bot_name, bot_identity): (Box<dyn Engine>, String, AnalysisBotV2) = match bot_kind
+        .as_str()
+    {
         "random" => (
             Box::new(RandomEngine::seeded(bot_seed)),
             format!("Random (seed {bot_seed})"),
+            AnalysisBotV2::Random { seed: bot_seed },
         ),
         "minimax" => {
             let limits = match minimax_time_ms {
@@ -275,10 +337,57 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
                 }
                 None => format!("Minimax (depth {minimax_depth})"),
             };
-            (Box::new(MinimaxEngine::new(limits)?), name)
+            let identity = match minimax_time_ms {
+                Some(move_time_ms) => AnalysisBotV2::MinimaxTimed {
+                    move_time_ms,
+                    maximum_depth: minimax_max_depth,
+                },
+                None => AnalysisBotV2::MinimaxFixed {
+                    depth: minimax_depth,
+                    baseline_move_digest: arena::MINIMAX_V1_MOVE_DIGEST,
+                },
+            };
+            (Box::new(MinimaxEngine::new(limits)?), name, identity)
         }
-        _ => return Err("--bot must be random or minimax".to_string()),
+        "alphamini" => {
+            let model = alphamini_model
+                .as_deref()
+                .ok_or("--alphamini-model is required for --bot alphamini")?;
+            let manifest = alphamini_manifest
+                .as_deref()
+                .ok_or("--alphamini-manifest is required for --bot alphamini")?;
+            let model_sha256 = sha256_file_hex(model)?;
+            let manifest_sha256 = sha256_file_hex(manifest)?;
+            let (engine, name) = make_alphamini(
+                Some(model),
+                Some(manifest),
+                alphamini_simulations,
+                alphamini_time_ms,
+                alphamini_batch_size,
+                bot_seed,
+            )?;
+            (
+                engine,
+                name,
+                AnalysisBotV2::AlphaMini {
+                    model_sha256,
+                    manifest_sha256,
+                    simulations: alphamini_simulations,
+                    move_time_ms: alphamini_time_ms,
+                    batch_size: alphamini_batch_size,
+                    seed: bot_seed,
+                    cpuct_ppm: ALPHAMINI_CPUCT_PPM,
+                    fpu_reduction_ppm: ALPHAMINI_FPU_REDUCTION_PPM,
+                    root_dirichlet_alpha_ppm: None,
+                    root_noise_fraction_ppm: 0,
+                    evaluator: ALPHAMINI_CPU_EVALUATOR_V1.to_string(),
+                },
+            )
+        }
+        _ => return Err("--bot must be random, minimax, or alphamini".to_string()),
     };
+    let stockfish_binary_sha256 = sha256_file_hex(&stockfish_path)?;
+    let calibration_binary_sha256 = sha256_running_executable()?;
 
     let mut games = Vec::new();
     let mut seen_game_urls = HashSet::new();
@@ -300,7 +409,7 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     let sample_config = SampleConfig {
         positions_per_side,
         min_ply,
-        max_ply,
+        max_ply: Some(max_ply),
         min_rating,
         max_rating,
     };
@@ -327,7 +436,9 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
         *count += 1;
         true
     });
-    samples.truncate(max_positions);
+    if let Some(max_positions) = max_positions {
+        samples.truncate(max_positions);
+    }
     if samples.is_empty() {
         return Err("the corpus produced no eligible positions".to_string());
     }
@@ -346,24 +457,70 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     let mut stockfish = Stockfish::start(&stockfish_path, nodes, hash_mb)?;
     let reference_engine = stockfish.name().to_string();
     let progress_step = (samples.len() / 100).max(1);
+    let evaluation_config = EvaluationConfig {
+        maximum_rows_per_player: analyzed_positions_per_player,
+        ..EvaluationConfig::default()
+    };
     let evaluated = evaluate_samples(
         &samples,
         &mut *bot,
         &mut stockfish,
-        EvaluationConfig {
-            maximum_rows_per_player: analyzed_positions_per_player,
-            ..EvaluationConfig::default()
-        },
+        evaluation_config,
         |completed, total| {
             if completed % progress_step == 0 || completed == total {
                 eprintln!("analyzed {completed}/{total} positions");
             }
         },
     )?;
+    // Refuse a run whose corpus changed after its initial content identity was
+    // captured. This keeps the metadata bound to the bytes actually sampled.
+    if sha256_paths(&corpus_paths)? != corpus_sha256
+        || sha256_paths(&exclude_corpus_paths)? != exclude_corpus_sha256
+    {
+        return Err("a corpus changed while analysis was running; discard this shard".to_string());
+    }
+    let mut experiment = AnalysisExperimentV2 {
+        corpus_digest_sha256: aggregate_corpus_sha256(&corpus_sha256, &exclude_corpus_sha256)?,
+        analysis_config_sha256: String::new(),
+        corpus_sha256,
+        exclude_corpus_sha256,
+        sampling: AnalysisSamplingV2 {
+            positions_per_side,
+            positions_per_player,
+            analyzed_positions_per_player,
+            max_positions,
+            minimum_rating: min_rating,
+            maximum_rating: max_rating,
+            minimum_ply: min_ply,
+            maximum_ply: max_ply,
+            sample_seed,
+            shard_count,
+            player_shard_schema: PLAYER_SHARD_SCHEMA_V1.to_string(),
+            minimum_best_expected_score_ppm: score_to_ppm(
+                evaluation_config.minimum_best_expected_score,
+            ),
+            maximum_best_expected_score_ppm: score_to_ppm(
+                evaluation_config.maximum_best_expected_score,
+            ),
+        },
+        bot: bot_identity,
+        reference: AnalysisReferenceV2 {
+            engine_name: reference_engine.clone(),
+            binary_sha256: stockfish_binary_sha256,
+            nodes_per_search: nodes,
+            hash_mb,
+            threads: 1,
+            show_wdl: true,
+        },
+        calibration_binary_sha256,
+    };
+    experiment.analysis_config_sha256 = analysis_config_sha256(&experiment)?;
     let artifact = AnalysisArtifact {
         metadata: AnalysisMetadata {
-            format_version: 1,
-            target: "Chess.com rated standard 30+0 (TimeControl 1800)".to_string(),
+            // v2 gives both the bot and Stockfish the replayed move prefix,
+            // preserving repetition state instead of reconstructing from FEN alone.
+            format_version: ANALYSIS_FORMAT_V2,
+            target: ANALYSIS_TARGET_V2.to_string(),
             bot: bot_name,
             reference_engine,
             reference_nodes_per_search: nodes,
@@ -375,18 +532,24 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
                 .map(|row| row.game_id.as_str())
                 .collect::<HashSet<_>>()
                 .len(),
+            experiment: Some(experiment),
+            shard_index: Some(shard_index),
+            attestation: None,
         },
         skipped_uninformative: evaluated.skipped_uninformative,
         skipped_player_cap: evaluated.skipped_player_cap,
         rows: evaluated.rows,
     };
-    let mut output = BufWriter::new(create_new(&output_path)?);
-    serde_json::to_writer_pretty(&mut output, &artifact)
+    validate_analysis_artifact(&artifact)?;
+    let mut encoded = serde_json::to_vec_pretty(&artifact)
         .map_err(|error| format!("could not encode analysis: {error}"))?;
-    output
-        .write_all(b"\n")
-        .and_then(|_| output.flush())
-        .map_err(|error| format!("could not write {}: {error}", output_path.display()))?;
+    encoded.push(b'\n');
+    publish_bytes_new(&output_path, &encoded).map_err(|error| {
+        format!(
+            "could not publish immutable analysis {}: {error}",
+            output_path.display()
+        )
+    })?;
     println!(
         "Saved {} analyzed positions to {} ({} uninformative and {} player-cap positions skipped).",
         artifact.rows.len(),
@@ -397,14 +560,164 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-/// FNV-1a gives reproducible sharding across processes and Rust versions.
-fn stable_player_hash(username: &str) -> u64 {
-    let mut hash = 0xcbf29ce484222325_u64;
-    for byte in username.bytes() {
-        hash ^= u64::from(byte.to_ascii_lowercase());
-        hash = hash.wrapping_mul(0x100000001b3);
+fn run_attest_v2(args: &[String]) -> Result<(), String> {
+    if wants_help(args) {
+        print!("{ATTEST_V2_HELP}");
+        return Ok(());
     }
-    hash
+    let parsed = Options::parse(args)?;
+    parsed.reject_unknown(&[
+        "analysis",
+        "output",
+        "experiment",
+        "shard-index",
+        "source-sha256",
+        "capture-manifest",
+        "capture-sha256",
+    ])?;
+    let source_path = parsed.required_path("analysis")?;
+    let output_path = parsed.required_path("output")?;
+    let experiment_path = parsed.required_path("experiment")?;
+    let capture_manifest_path = parsed.required_path("capture-manifest")?;
+    let expected_source_sha256 = parsed.required("source-sha256")?;
+    let expected_capture_sha256 = parsed.required("capture-sha256")?;
+    let shard_index = parsed
+        .required("shard-index")?
+        .parse::<u64>()
+        .map_err(|error| format!("invalid --shard-index value: {error}"))?;
+
+    let source_json = fs::read(&source_path)
+        .map_err(|error| format!("could not read {}: {error}", source_path.display()))?;
+    let source: AnalysisArtifact = serde_json::from_slice(&source_json)
+        .map_err(|error| format!("invalid analysis file {}: {error}", source_path.display()))?;
+    let experiment_json = fs::read(&experiment_path)
+        .map_err(|error| format!("could not read {}: {error}", experiment_path.display()))?;
+    let mut experiment: AnalysisExperimentV2 =
+        serde_json::from_slice(&experiment_json).map_err(|error| {
+            format!(
+                "invalid experiment identity {}: {error}",
+                experiment_path.display()
+            )
+        })?;
+    normalize_experiment_digests(&mut experiment)?;
+    let capture_manifest = fs::read(&capture_manifest_path).map_err(|error| {
+        format!(
+            "could not read capture manifest {}: {error}",
+            capture_manifest_path.display()
+        )
+    })?;
+    let attestor_binary_sha256 = sha256_running_executable()?;
+
+    let sealed = attest_legacy_v2_artifact(
+        &source,
+        &source_json,
+        &expected_source_sha256,
+        experiment,
+        shard_index,
+        PostHocAttestationInputV2 {
+            capture_manifest_bytes: &capture_manifest,
+            expected_capture_manifest_sha256: &expected_capture_sha256,
+            attestor_binary_sha256: &attestor_binary_sha256,
+        },
+    )?;
+    let mut encoded = serde_json::to_vec_pretty(&sealed)
+        .map_err(|error| format!("could not encode attested analysis: {error}"))?;
+    encoded.push(b'\n');
+    publish_bytes_new(&output_path, &encoded).map_err(|error| {
+        format!(
+            "could not publish immutable attestation {}: {error}",
+            output_path.display()
+        )
+    })?;
+    println!(
+        "Sealed shard {shard_index} from {} into {} (source SHA-256 {}).",
+        source_path.display(),
+        output_path.display(),
+        expected_source_sha256
+    );
+    Ok(())
+}
+
+fn normalize_experiment_digests(experiment: &mut AnalysisExperimentV2) -> Result<(), String> {
+    let corpus_digest =
+        aggregate_corpus_sha256(&experiment.corpus_sha256, &experiment.exclude_corpus_sha256)?;
+    if experiment.corpus_digest_sha256.is_empty() {
+        experiment.corpus_digest_sha256 = corpus_digest;
+    } else if experiment.corpus_digest_sha256 != corpus_digest {
+        return Err("experiment corpus digest does not match its ordered file hashes".to_string());
+    }
+    let config_digest = analysis_config_sha256(experiment)?;
+    if experiment.analysis_config_sha256.is_empty() {
+        experiment.analysis_config_sha256 = config_digest;
+    } else if experiment.analysis_config_sha256 != config_digest {
+        return Err("experiment config digest does not match its effective settings".to_string());
+    }
+    Ok(())
+}
+
+fn sha256_running_executable() -> Result<String, String> {
+    let proc_self = Path::new("/proc/self/exe");
+    if proc_self.exists() {
+        return sha256_file_hex(proc_self);
+    }
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("cannot resolve current executable: {error}"))?;
+    sha256_file_hex(&executable)
+}
+
+#[cfg(feature = "alphamini")]
+fn make_alphamini(
+    model: Option<&Path>,
+    manifest: Option<&Path>,
+    simulations: u32,
+    time_ms: u64,
+    batch_size: usize,
+    seed: u64,
+) -> Result<(Box<dyn Engine>, String), String> {
+    let model = model.ok_or("--alphamini-model is required for --bot alphamini")?;
+    let manifest = manifest.ok_or("--alphamini-manifest is required for --bot alphamini")?;
+    if simulations == 0 || time_ms == 0 || batch_size == 0 {
+        return Err("AlphaMini search limits must be greater than zero".to_string());
+    }
+    let engine = AlphaMiniEngine::load(
+        model,
+        manifest,
+        SearchConfig {
+            simulations,
+            batch_size,
+            move_time: Some(Duration::from_millis(time_ms)),
+            cpuct: ALPHAMINI_CPUCT_PPM as f32 / 1_000_000.0,
+            fpu_reduction: ALPHAMINI_FPU_REDUCTION_PPM as f32 / 1_000_000.0,
+            root_dirichlet_alpha: None,
+            root_noise_fraction: 0.0,
+        },
+        seed,
+    )?;
+    let name = format!(
+        "{} ({time_ms} ms/move, {simulations} simulation cap, batch {batch_size})",
+        engine.name()
+    );
+    Ok((Box::new(engine), name))
+}
+
+#[cfg(not(feature = "alphamini"))]
+fn make_alphamini(
+    _model: Option<&Path>,
+    _manifest: Option<&Path>,
+    _simulations: u32,
+    _time_ms: u64,
+    _batch_size: usize,
+    _seed: u64,
+) -> Result<(Box<dyn Engine>, String), String> {
+    Err(
+        "AlphaMini calibration requires `cargo run -p calibrate --release --features alphamini -- ...`"
+            .to_string(),
+    )
+}
+
+fn score_to_ppm(score: f64) -> u32 {
+    debug_assert!(score.is_finite() && (0.0..=1.0).contains(&score));
+    (score * 1_000_000.0).round() as u32
 }
 
 fn run_report(args: &[String]) -> Result<(), String> {
@@ -437,26 +750,9 @@ fn run_report(args: &[String]) -> Result<(), String> {
                 .map_err(|error| format!("could not read {}: {error}", analysis_path.display()))?,
         )
         .map_err(|error| format!("invalid analysis file {}: {error}", analysis_path.display()))?;
-        if artifact.metadata.format_version != 1 {
-            return Err(format!(
-                "unsupported analysis format version {} in {}",
-                artifact.metadata.format_version,
-                analysis_path.display()
-            ));
-        }
-        if let Some(first) = artifacts.first()
-            && (artifact.metadata.target != first.metadata.target
-                || artifact.metadata.bot != first.metadata.bot
-                || artifact.metadata.reference_engine != first.metadata.reference_engine
-                || artifact.metadata.reference_nodes_per_search
-                    != first.metadata.reference_nodes_per_search)
-        {
-            return Err(
-                "analysis artifacts use different bot, target, or reference settings".to_string(),
-            );
-        }
         artifacts.push(artifact);
     }
+    validate_analysis_artifacts(&artifacts)?;
     let metadata = &artifacts[0].metadata;
     let rows: Vec<_> = artifacts
         .iter()
@@ -480,6 +776,23 @@ fn run_report(args: &[String]) -> Result<(), String> {
         "Reference: {} at {} nodes/search",
         metadata.reference_engine, metadata.reference_nodes_per_search
     );
+    println!(
+        "Position history: {}",
+        if metadata.format_version >= 2 {
+            "legal UCI prefix replayed for candidate and reference"
+        } else {
+            "legacy FEN-only reconstruction"
+        }
+    );
+    if let Some(attestation) = &metadata.attestation {
+        println!(
+            "Provenance: post-hoc attested from captured run metadata (evidence SHA-256 {}, {} source shards).",
+            attestation.capture_manifest_sha256,
+            artifacts.len()
+        );
+    } else if metadata.format_version == ANALYSIS_FORMAT_V2 {
+        println!("Provenance: native sealed v2 artifact set.");
+    }
     let analyzed_games = rows
         .iter()
         .map(|row| row.game_id.as_str())

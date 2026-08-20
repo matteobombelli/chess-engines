@@ -65,14 +65,30 @@ impl Stockfish {
     }
 
     /// Expected score for the root side, optionally with one forced root move.
-    pub fn expected_score(&mut self, fen: &str, search_move: Option<&str>) -> Result<f64, String> {
-        self.analyze(fen, search_move)
+    pub fn expected_score(
+        &mut self,
+        fen: &str,
+        uci_prefix: &[String],
+        search_move: Option<&str>,
+    ) -> Result<f64, String> {
+        self.analyze(fen, uci_prefix, search_move)
             .map(|analysis| analysis.expected_score)
     }
 
-    pub fn analyze(&mut self, fen: &str, search_move: Option<&str>) -> Result<UciAnalysis, String> {
+    pub fn analyze(
+        &mut self,
+        fen: &str,
+        uci_prefix: &[String],
+        search_move: Option<&str>,
+    ) -> Result<UciAnalysis, String> {
         if fen.contains(['\n', '\r']) {
             return Err("FEN contains a newline".to_string());
+        }
+        if uci_prefix
+            .iter()
+            .any(|mv| mv.contains(char::is_whitespace) || !(4..=5).contains(&mv.len()))
+        {
+            return Err("invalid UCI move in position prefix".to_string());
         }
         if search_move
             .is_some_and(|mv| mv.contains(['\n', '\r', ' ']) || !(4..=5).contains(&mv.len()))
@@ -85,7 +101,13 @@ impl Stockfish {
         // cached work to a later move or even to the next sampled position.
         self.send("setoption name Clear Hash")?;
         self.ready()?;
-        self.send(&format!("position fen {fen}"))?;
+        if uci_prefix.is_empty() {
+            self.send(&format!("position fen {fen}"))?;
+        } else {
+            // Replaying from startpos gives the reference engine the same
+            // repetition state as the human and candidate engine.
+            self.send(&format!("position startpos moves {}", uci_prefix.join(" ")))?;
+        }
         let command = match search_move {
             Some(mv) => format!("go nodes {} searchmoves {mv}", self.nodes),
             None => format!("go nodes {}", self.nodes),

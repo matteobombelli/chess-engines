@@ -77,6 +77,7 @@ pub fn sample_game<R: Rng + ?Sized>(
 
     let movetext = mainline_movetext(&game.pgn)?;
     let mut board = Board::import_san("")?;
+    let mut uci_prefix = Vec::new();
     let mut white = Vec::new();
     let mut black = Vec::new();
 
@@ -89,26 +90,30 @@ pub fn sample_game<R: Rng + ?Sized>(
         };
         let fen = board.to_fen();
         let legal_move_count = board.get_legal_moves().len();
+        let actor_rating = u16::try_from(player.rating).ok();
+        let in_ply_range = ply >= config.min_ply && config.max_ply.is_none_or(|max| ply <= max);
+        let in_rating_range = actor_rating
+            .is_some_and(|rating| (config.min_rating..=config.max_rating).contains(&rating));
+        let sample_prefix =
+            (in_ply_range && in_rating_range && legal_move_count > 1).then(|| uci_prefix.clone());
         let human_move = board
             .san_to_move(san)
             .map_err(|error| format!("{} ply {ply}: {error}", game.url))?;
+        let human_move = human_move.to_uci();
+        uci_prefix.push(human_move.clone());
 
-        let Ok(actor_rating) = u16::try_from(player.rating) else {
+        let (Some(actor_rating), Some(sample_prefix)) = (actor_rating, sample_prefix) else {
             continue;
         };
-        let in_ply_range = ply >= config.min_ply && config.max_ply.is_none_or(|max| ply <= max);
-        let in_rating_range = (config.min_rating..=config.max_rating).contains(&actor_rating);
-        if !in_ply_range || !in_rating_range || legal_move_count <= 1 {
-            continue;
-        }
 
         let sample = PositionSample {
             game_id: game.url.clone(),
             actor_username: player.username.clone(),
             actor_rating,
             ply,
+            uci_prefix: sample_prefix,
             fen,
-            human_move: human_move.to_uci(),
+            human_move,
         };
         match actor {
             Color::White => white.push(sample),
@@ -241,10 +246,10 @@ mod tests {
         assert_eq!(samples.len(), 2);
         assert_ne!(samples[0].ply % 2, samples[1].ply % 2);
         for sample in samples {
-            Board::from_fen(&sample.fen)
-                .unwrap()
-                .move_from_uci(&sample.human_move)
-                .unwrap();
+            assert_eq!(sample.uci_prefix.len(), usize::from(sample.ply - 1));
+            let replayed = Board::import_uci(&sample.uci_prefix).unwrap();
+            assert_eq!(replayed.to_fen(), sample.fen);
+            replayed.move_from_uci(&sample.human_move).unwrap();
         }
     }
 

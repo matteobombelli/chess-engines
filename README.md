@@ -26,7 +26,11 @@ Content-Type: application/json
 
 It returns the bot's legal SAN move and the resulting FEN. An absent or empty `san` means the game has not started and the bot moves first.
 
-One field, one source of truth: the bot rebuilds the position by replaying the movetext through `chess-core`, so there is no FEN that could contradict the moves. It also gives the learned engines the move history they predict from, which a position cannot supply — many move orders reach the same board, and a sequence model has to know which one was played. The replay is strict: move numbers and result tokens are dropped, and every other token must be a legal move at the ply it appears, so a game is never silently replayed as a different one.
+One field, one source of truth: the bot rebuilds the position by replaying the
+movetext through `chess-core`, so there is no FEN that could contradict the
+moves, and repetition state remains exact. The replay is strict: move numbers
+and result tokens are dropped, and every other token must be a legal move at the
+ply it appears, so a game is never silently replayed as a different one.
 
 Before adding an ML model, run the repository tests:
 
@@ -41,7 +45,7 @@ colors, checks every move for legality, and reports their win/draw/loss record,
 match score, and relative Elo with an approximate 95% interval:
 
 ```sh
-cargo run -p arena --release -- --games 200 --depth 3 --seed 1
+cargo run -p arena --release --bin arena -- --games 200 --depth 3 --seed 1
 ```
 
 The seed makes the Random moves reproducible. Keep the game count, Minimax
@@ -52,9 +56,10 @@ This is a **relative** rating: the report defines Random as 0 Elo and estimates
 Minimax's difference from it. Two bots cannot establish an absolute human or
 online-platform Elo. That requires a calibrated pool of reference engines.
 
-When the arena is later used for two deterministic bots, give both bots the
-same suite of opening positions and play every opening twice with colors
-reversed. Random already supplies game-to-game variation in this first matchup.
+Deterministic comparisons use the committed, balanced opening suite and play
+every prefix twice with colors reversed. AlphaMini evaluation additionally
+bootstraps whole opening pairs, writes a resumable JSONL record, and freezes the
+model, opponent, search, suite, and binary identities.
 
 For a platform-calibrated estimate instead, the `calibrate` crate compares bot
 move quality with rated humans in public Chess.com games at exactly 30+0. See
@@ -66,6 +71,27 @@ analysis, statistical fitting, and the limits of that estimate. Chess.com calls
 
 The `minimax` crate has a guided alpha-beta search scaffold in
 `minimax/src/search.rs`. See `minimax/README.md` for the implementation order.
+
+## AlphaMini
+
+`alphamini` is a compact AlphaZero-style CNN/PUCT engine. Rust owns rules,
+encoding, legal masks, MCTS, concurrent GPU-batched self-play, immutable raw
+shards, and CPU ONNX serving. Python owns the residual CNN, replay sampling,
+optimization, crash-safe checkpoints, ONNX export, and the run ledger.
+
+Start with the [current status and continuation handoff](docs/alphamini/status.md),
+then read the [design](docs/alphamini/design.md) and follow the
+[training runbook](docs/alphamini/training-runbook.md). The v1 run is complete:
+72.09 hours of cumulative active compute across a three-directory weights-only
+lineage, at inference batch 256, with the resulting model served in production.
+Its lineage, incidents, and evaluation are in the
+[run 003 result](docs/alphamini/results/run-003.md).
+
+AlphaMini calibrates to about **1970 Chess.com 30+0 move-quality Elo**, with a
+95% whole-player bootstrap interval from 1758 to at or above 1999. The frozen
+Depth-3 baseline calibrates to about 1640 with a wide interval from at or below
+1400 to 1780; see its [calibration report](calibrate/DEPTH_THREE_RESULTS.md).
+Both are historical-position move-quality estimates, not full-game ratings.
 
 ## Deploy
 
@@ -81,7 +107,7 @@ and local-only commits. It never creates a merge commit or rewrites production
 history. For a build of the already-checked-out commit without fetching, use
 `./scripts/deploy.sh` directly.
 
-The active Caddy site must include the two namespaced API handlers from
+The active Caddy site must include the three namespaced API handlers from
 `deploy/caddy/chessengines.caddy` before its Chess Engines static-file handler.
 After changing Caddy, validate and reload it once:
 
@@ -94,16 +120,16 @@ The deploy script checks those routes before building or changing production,
 so an outdated proxy configuration cannot leave a partially deployed release.
 Set `CHESSENGINES_CADDY_CONFIG` if the active Caddyfile lives elsewhere.
 
-The script runs the workspace tests, builds both bot APIs and the frontend in
-release mode, publishes the frontend to `/srv/chessengines`, restarts the
-`chessengines-random` and `chessengines-minimax` user services, and verifies
-all three playable bot configurations.
+The script runs the workspace tests, builds all three bot APIs and the frontend
+in release mode, validates AlphaMini's ONNX model and manifest, publishes the
+frontend to `/srv/chessengines`, restarts the three user services, and
+smoke-tests all routes.
 
-Production service and reverse-proxy templates live under `deploy/`. Random
-listens on port 3002 and Minimax listens on port 3004. The Minimax service
-offers a fixed depth-3 route and a timed route. The timed version uses a
-9-second move budget and a depth ceiling of 64. The time budget normally stops
-the search first.
+Production service and reverse-proxy templates live under `deploy/`. Random,
+Minimax, and AlphaMini listen on ports 3002, 3004, and 3006. AlphaMini serves
+FP32 ONNX on CPU with one bounded search at a time and the frozen 9-second,
+10,000-simulation, batch-8 release budget. Its immutable `model.onnx` and
+`manifest.json` live outside Git under `artifacts/alphamini/current`.
 
 ## Working rule
 

@@ -1,0 +1,25 @@
+[Unit]
+Description=Chess Engines AlphaMini bot API
+After=network.target
+
+[Service]
+Type=simple
+User=hs
+Group=hs
+WorkingDirectory=/home/hs/chess-engines
+Environment=ALPHAMINI_BIND_ADDRESS=127.0.0.1:3006
+Environment=ALPHAMINI_MODEL_PATH=/home/hs/chess-engines/artifacts/alphamini/current/model.onnx
+Environment=ALPHAMINI_MANIFEST_PATH=/home/hs/chess-engines/artifacts/alphamini/current/manifest.json
+Environment=ALPHAMINI_MOVE_TIME_MS=9000
+Environment=ALPHAMINI_MAX_SIMULATIONS=10000
+Environment=ALPHAMINI_BATCH_SIZE=8
+Environment=ALPHAMINI_MAX_CONCURRENT_SEARCHES=1
+ExecStart=/home/hs/chess-engines/target/release/alphamini
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=default.target

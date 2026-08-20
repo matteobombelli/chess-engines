@@ -11,6 +11,10 @@ bot the same public historical position and asks Stockfish how much expected
 score each move lost. It then finds the rating at which human and bot loss are
 equal.
 
+Sampling retains the legal move prefix, not just the final FEN. The candidate
+engine and Stockfish both replay that prefix, so repetition state is identical
+for the human, candidate, and reference searches.
+
 ## Requirements
 
 Install Stockfish 17 or another recent build that supports `UCI_ShowWDL`. On
@@ -114,6 +118,60 @@ Keep the corpus, sample seed, sampling bounds, and reference node budget fixed
 when comparing bot versions. Random's bot seed is separate from the position
 sampling seed.
 
+### Artifact identity and shard sealing
+
+New analysis files use format v2. Each one records ordered primary and
+exclusion corpus hashes, a domain-separated aggregate corpus digest, a
+canonical digest of all effective sampling/search settings, the shard count
+and index, the Stockfish binary/hash/nodes/hash-table settings, and the exact
+candidate binary identity (including model and manifest hashes for AlphaMini).
+The writer rehashes corpora after evaluation and refuses publication if they
+changed during the run.
+
+`report` deep-validates every v2 row before fitting: the UCI prefix must contain
+exactly `ply - 1` moves, replay to the exact stored FEN, and make the human,
+candidate, and reference moves legal alternatives at that root. It also checks
+scores/losses, accounting, player-to-shard assignment, duplicate row IDs,
+identical experiment identities, and one complete set of shard indexes. Legacy
+format-v1 artifacts remain reportable as explicitly FEN-only data, but v1 and
+v2 can never be combined.
+
+Four replay-capable v2 shards were produced before the identity fields landed.
+They may be upgraded only from contemporaneously captured evidence, never by
+editing the originals. Prepare a strict `AnalysisExperimentV2` JSON file (the
+two derived digest strings may be empty for the command to fill) and a capture
+manifest with exactly these keys:
+
+```json
+{
+  "schema": "calibration-capture-v1",
+  "producer_binary_sha256": "<64 lowercase hex>",
+  "stockfish_binary_sha256": "<64 lowercase hex>",
+  "corpus_sha256": ["<ordered primary corpus hashes>"],
+  "exclude_corpus_sha256": [],
+  "exact_commands": ["<one literal producer command per shard, in index order>"]
+}
+```
+
+Then seal each source to a new path:
+
+```sh
+cargo run -p calibrate -- attest-v2 \
+  --analysis runs/early-v2-shard-0.json \
+  --output runs/sealed-v2-shard-0.json \
+  --experiment runs/experiment-v2.json \
+  --shard-index 0 \
+  --source-sha256 '<hash of the exact source bytes>' \
+  --capture-manifest runs/capture-v1.json \
+  --capture-sha256 '<hash of the exact capture-manifest bytes>'
+```
+
+The command verifies both supplied byte hashes, cross-checks the capture
+manifest against the experiment, performs the full row/shard validation, and
+records `post_hoc_attested: true`, the source hash, evidence hash, and attestor
+binary hash. Outputs use create-new semantics. A report additionally requires
+the complete attested shard set and rejects mixing native and attested shards.
+
 ## 3. Fit and inspect the estimate
 
 ```sh
@@ -145,10 +203,11 @@ The first reproducible 1,000-game run is summarized in
 400+ range and fixed-depth-3 Minimax at roughly 1750, with substantial
 uncertainty above 2000 due to sparse exact-30+0 data there.
 
-The refined fixed-depth-3 result is in
-[`DEPTH_THREE_RESULTS.md`](DEPTH_THREE_RESULTS.md). It replaces the preliminary
-Minimax figure with an estimate of about 1675 and a 95% player-bootstrap
-confidence interval of 1572 to 1748.
+The frozen fixed-depth-3 result is in
+[`DEPTH_THREE_RESULTS.md`](DEPTH_THREE_RESULTS.md). It estimates about 1640
+move-quality Elo, with a 95% whole-player bootstrap interval from at or below
+1400 to 1780. This rerun binds the deterministic engine digest used by the
+AlphaMini release gate.
 
 The stronger-player calibration for the deployed 9-second move budget is in
 [`NINE_SECOND_RESULTS.md`](NINE_SECOND_RESULTS.md). It estimates roughly 2050

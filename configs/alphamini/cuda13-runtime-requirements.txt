@@ -1,0 +1,12 @@
+# AlphaMini Rust ORT CUDA runtime. Linux x86_64 only.
+#
+# Install only through scripts/alphamini-cuda-runtime. The wrapper uses
+# --require-hashes --no-deps --only-binary=:all: and an isolated --target;
+# these packages must never be installed over alphamini-train/.venv.
+nvidia-cuda-runtime==13.2.86 --hash=sha256:3498247680dfddce31bad102af7e3e26fc795342a3cac64722bb0fa95e7f60f0
+nvidia-cublas==13.2.2.2 --hash=sha256:77466d8d568b1750389a0632580e256552bf8d21ae40223e871ac8fb381020c8
+nvidia-cuda-nvrtc==13.2.86 --hash=sha256:8111c5130e967b78222ea2124145f8efe9ce201b752b2579a2513100a53be1c5
+nvidia-cufft==12.2.0.57 --hash=sha256:34da27fadf3979b0b042c43823f0530be8408b86df31ee0108e1ca0b621d4ef6
+nvidia-curand==10.4.2.66 --hash=sha256:9bb3796a2f6223454b2e326e3d7572c1500cfa4d629de827676b4eeecd30ab0c
+nvidia-cudnn-cu13==9.23.2.1 --hash=sha256:0c38408c043d67ea8a3cbe61fe272c3cf5c7f5ec466adfe8ac63e91d4f11cdc7
+nvidia-nvjitlink==13.2.86 --hash=sha256:285a9cead9924391588d794400bdd7e8f9d1a277a7d78ed79acfa0ea702a14dd

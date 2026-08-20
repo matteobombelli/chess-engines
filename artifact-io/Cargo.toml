@@ -1,0 +1,12 @@
+[package]
+name = "artifact-io"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Small checksum and immutable artifact publication primitives"
+
+[dependencies]
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
