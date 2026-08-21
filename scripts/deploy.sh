@@ -84,7 +84,7 @@ echo "Building frontend..."
 )
 
 echo "Publishing frontend to $STATIC_ROOT..."
-rsync -a frontend/dist/ "$STATIC_ROOT/"
+rsync -a --delete frontend/dist/ "$STATIC_ROOT/"
 
 echo "Restarting $RANDOM_SERVICE_NAME and $MINIMAX_SERVICE_NAME..."
 systemctl --user restart "$RANDOM_SERVICE_NAME" "$MINIMAX_SERVICE_NAME"
