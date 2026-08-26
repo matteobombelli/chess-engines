@@ -599,9 +599,16 @@ h2 {
 }
 
 .training-intro {
-    margin: 0;
     color: var(--ink-soft);
     line-height: 1.6;
+}
+
+.training-intro p {
+    margin: 0 0 10px;
+}
+
+.training-intro p:last-child {
+    margin-bottom: 0;
 }
 
 .training-stats {

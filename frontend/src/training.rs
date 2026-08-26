@@ -20,9 +20,14 @@ pub fn TrainingProgress() -> impl IntoView {
         <div class="training">
             <div class="training-heading">
                 <h3>"Training progress"</h3>
-                <p class="training-intro">
-                    "The deployed network is the product of 391 self-play cycles across three chained runs. Each cycle plays a batch of games against itself, then updates the network on the positions those games produced. Loss measures how far its predictions fall from what the search and the finished games actually did; lower is better."
-                </p>
+                <div class="training-intro">
+                    <p>
+                        "The deployed network is the product of 391 self-play cycles across three chained runs. Each cycle plays a batch of games against itself, then updates the network on the positions those games produced."
+                    </p>
+                    <p>
+                        "Loss measures how far the network's predictions fall from what the search and the finished games actually did. Lower is better."
+                    </p>
+                </div>
             </div>
 
             <dl class="training-stats">
@@ -87,7 +92,8 @@ pub fn TrainingProgress() -> impl IntoView {
                     <text class="end-label" x="612" y="225.5">"train 2.86"</text>
                 </svg>
                 <figcaption>
-                    "Move and result loss combined, one point per cycle. Most of the improvement lands in the first five hours. Progress after that is slow but real: the network chases a moving target, because every cycle it trains on stronger games than the last."
+                    <strong>"Total loss."</strong>
+                    " Move and result loss combined, one point per cycle. Most of the improvement comes in the first five hours. Progress after that is slow but real: the network chases a moving target, because every cycle it trains on stronger games than the last."
                 </figcaption>
             </figure>
 
@@ -131,7 +137,7 @@ pub fn TrainingProgress() -> impl IntoView {
                     </svg>
                     <figcaption>
                         <strong>"Result prediction."</strong>
-                        " How well the network calls the outcome — win, draw, or loss. The gap between the curves is its weakest point: results of held-out games stay harder to call than its own training batch."
+                        " How well the network calls whether a game ends in a win, a draw, or a loss. The gap between the curves is its weakest point: results of held-out games stay harder to call than its own training batch."
                     </figcaption>
                 </figure>
             </div>
@@ -155,7 +161,7 @@ pub fn TrainingProgress() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Learning rate."</strong>
-                    " The size of each weight update. It rises to full strength in the first hour, then follows a slow cosine decay so late training refines rather than overwrites. The two dips near eleven hours are run restarts warming back up."
+                    " The size of each weight update. It rises to full strength in the first hour, then follows a slow cosine decay so that late updates only make small refinements. The two dips near eleven hours are run restarts warming back up."
                 </figcaption>
             </figure>
         </div>

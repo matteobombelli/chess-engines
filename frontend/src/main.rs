@@ -42,7 +42,7 @@ impl Model {
             Self::Random => "Random",
             Self::MinimaxDepth3 => "Minimax · depth 3",
             Self::MinimaxNineSeconds => "Minimax · 9 seconds",
-            Self::AlphaMini => "AlphaMini · Run 1",
+            Self::AlphaMini => "AlphaMini",
         }
     }
 
