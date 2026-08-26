@@ -5,6 +5,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
+mod training;
+use training::TrainingProgress;
+
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -483,7 +486,7 @@ fn App() -> impl IntoView {
                             </article>
                         </div>
                     </section>
-                },
+                }.into_any(),
                 Model::MinimaxDepth3 => view! {
                     <section class="about-model" id="about-model" aria-labelledby="about-model-title">
                         <div class="about-heading">
@@ -517,7 +520,7 @@ fn App() -> impl IntoView {
                             </article>
                         </div>
                     </section>
-                },
+                }.into_any(),
                 Model::MinimaxNineSeconds => view! {
                     <section class="about-model" id="about-model" aria-labelledby="about-model-title">
                         <div class="about-heading">
@@ -551,7 +554,7 @@ fn App() -> impl IntoView {
                             </article>
                         </div>
                     </section>
-                },
+                }.into_any(),
                 Model::AlphaMini => view! {
                     <section class="about-model" id="about-model" aria-labelledby="about-model-title">
                         <div class="about-heading">
@@ -584,8 +587,10 @@ fn App() -> impl IntoView {
                                 </p>
                             </article>
                         </div>
+
+                        <TrainingProgress/>
                     </section>
-                },
+                }.into_any(),
             }}
         </main>
     }
