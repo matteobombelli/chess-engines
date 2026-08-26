@@ -8,7 +8,16 @@ const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 
 impl Board {
     /// The Standard Algebraic Notation for a move, without any check/mate suffix,
     /// computed against the pre-move position `self`
+    #[cfg(test)]
     pub(crate) fn san_body(&self, mv: Move) -> String {
+        self.san_body_with_legal_moves(mv, &self.get_legal_moves())
+    }
+
+    /// [`san_body`](Self::san_body) for a caller that already holds the legal
+    /// moves of `self`. Disambiguation is the only part of SAN that needs them,
+    /// and regenerating them per labelled move is what made labelling a whole
+    /// move list quadratic.
+    pub(crate) fn san_body_with_legal_moves(&self, mv: Move, legal_moves: &[Move]) -> String {
         let from: Square = mv.start_square;
         let to: Square = mv.end_square;
         let kind: PieceKind = mv.piece.kind;
@@ -48,7 +57,7 @@ impl Board {
             }
         } else {
             san.push_str(kind_letter(kind));
-            san.push_str(&self.disambiguation(mv));
+            san.push_str(&self.disambiguation(mv, legal_moves));
             if is_capture {
                 san.push('x');
             }
@@ -60,14 +69,16 @@ impl Board {
 
     /// The disambiguation part of a piece move: the extra origin file and/or rank
     /// needed when another same-kind piece could also land on the destination
-    fn disambiguation(&self, mv: Move) -> String {
+    ///
+    /// `legal_moves` must be the legal moves of `self`, the position the move
+    /// is being labelled against.
+    fn disambiguation(&self, mv: Move, legal_moves: &[Move]) -> String {
         let from: Square = mv.start_square;
 
         // Other legal moves of the same piece kind reaching the same square.
         // Using legal (not pseudo-legal) moves resolves pinned-piece cases.
-        let others: Vec<Square> = self
-            .get_legal_moves()
-            .into_iter()
+        let others: Vec<Square> = legal_moves
+            .iter()
             .filter(|m| {
                 m.piece.kind == mv.piece.kind
                     && m.end_square == mv.end_square
@@ -135,9 +146,10 @@ impl Board {
     /// canonical UCI — without searching the legal set a second time.
     pub fn san_to_move(&mut self, san: &str) -> Result<Move, String> {
         let target: String = normalize_san(san);
-        for mv in self.get_legal_moves() {
-            if normalize_san(&self.san_body(mv)) == target {
-                self.make_move(mv);
+        let legal_moves: Vec<Move> = self.get_legal_moves();
+        for &mv in &legal_moves {
+            if normalize_san(&self.san_body_with_legal_moves(mv, &legal_moves)) == target {
+                self.make_move_with_legal_moves(mv, &legal_moves);
                 return Ok(mv);
             }
         }
@@ -235,6 +247,7 @@ fn normalize_san(san: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Status;
 
     /// The SAN body of a hand-built move on a position
     fn body(fen: &str, mv: Move) -> String {
@@ -591,5 +604,72 @@ mod tests {
             }),
             "the pawn should have underpromoted on a8"
         );
+    }
+
+    /// Seeded random games from positions chosen for castling, en passant,
+    /// promotion, and disambiguation, digesting everything an optimization of
+    /// the replay path could plausibly change.
+    fn replay_digest(games: u64, max_plies: usize) -> u64 {
+        const STARTS: [&str; 9] = [
+            "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+            "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+            "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1",
+            "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+            "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+            "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 10",
+            "8/PPPk4/8/8/8/8/4Kppp/8 w - - 0 1",
+            "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+            "4k3/8/8/3pP3/8/8/8/4K3 w - d6 0 1",
+        ];
+
+        let mut digest = 0xcbf2_9ce4_8422_2325_u64;
+        let absorb = |text: &str, digest: &mut u64| {
+            for byte in text.as_bytes() {
+                *digest = (*digest ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        };
+
+        for game in 0..games {
+            let mut rng = 0x5eed_0000_0000_0000_u64 ^ game;
+            let mut board =
+                Board::from_fen(STARTS[game as usize % STARTS.len()]).expect("FEN should parse");
+
+            for _ in 0..max_plies {
+                let legal = board.get_legal_moves();
+                absorb(&board.to_fen(), &mut digest);
+                for mv in &legal {
+                    absorb(&mv.to_uci(), &mut digest);
+                    absorb(&board.san_for(*mv), &mut digest);
+                }
+                let status = board.status();
+                absorb(&format!("{status:?}{}", board.is_in_check()), &mut digest);
+                if legal.is_empty() || status != Status::Ongoing {
+                    break;
+                }
+
+                rng = rng.wrapping_add(0x9e37_79b9_7f4a_7c15);
+                let mut draw = rng;
+                draw = (draw ^ (draw >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+                draw = (draw ^ (draw >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+                let chosen = board.san_for(legal[(draw ^ (draw >> 31)) as usize % legal.len()]);
+
+                let played = board.san_to_move(&chosen).expect("its own label is legal");
+                absorb(&played.to_uci(), &mut digest);
+                absorb(
+                    board.san_history.last().expect("a move was recorded"),
+                    &mut digest,
+                );
+            }
+            absorb(&board.export_san(), &mut digest);
+        }
+        digest
+    }
+
+    #[test]
+    fn replaying_seeded_games_is_frozen_behavior() {
+        // Legality, SAN labelling, and status classification are a public
+        // contract that an optimization of this path must not disturb. A
+        // deliberate change to any of them has to re-freeze this digest.
+        assert_eq!(replay_digest(9, 16), 0x9c19_e902_7dc8_fc14);
     }
 }

@@ -1,0 +1,58 @@
+schema = "minigpt.config.v1"
+
+[run]
+name = "minigpt-pilot"
+description = "Throwaway end-to-end correctness and throughput pilot for the S variant"
+seed = 1
+active_budget_hours = 1.0
+disposable = true
+
+# S variant: 8 layers at d_model 512, roughly 27.7M parameters.
+[model]
+d_model = 512
+n_layers = 8
+n_heads = 8
+d_ff = 2048
+ctx = 256
+vocab = 4736
+dropout = 0.1
+
+[data]
+shards_dir = "data/minigpt/shards"
+tokenizer = "policy-v1"
+bos_token = 4672
+pad_token = 4673
+length_buckets = 8
+
+# micro_batch 64 x grad_accum 4 = 256 whole games per optimizer step (~78 tokens
+# each), so ~20k real tokens per step and 2_500 steps is a ~50M-token pilot.
+[training]
+micro_batch = 64
+grad_accum = 4
+total_steps = 2500
+segment_steps = 100
+learning_rate = 0.0003
+minimum_learning_rate = 0.00003
+warmup_fraction = 0.02
+weight_decay = 0.1
+gradient_clip = 1.0
+eval_interval_steps = 50
+eval_batches = 8
+checkpoint_interval_steps = 50
+early_stop_patience_evals = 4
+checkpoint_keep_last = 2
+checkpoint_milestone_every_steps = 200
+disk_floor_bytes = 53687091200
+device = "cuda"
+amp = true
+deterministic = true
+
+[export]
+opset = 17
+dtype = "float32"
+parity_atol = 0.001
+parity_rtol = 0.0
+decode_temperature = 0.5
+
+[operations]
+heartbeat_seconds = 30

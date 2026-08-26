@@ -1,0 +1,62 @@
+schema = "minigpt.config.v1"
+
+[run]
+name = "minigpt-v1"
+description = "MiniGPT v1: next-move GPT over the filtered Lichess corpus"
+seed = 20260826
+active_budget_hours = 72.0
+disposable = false
+
+# M variant: 12 layers at d_model 512, 40.3M parameters (tied embedding).
+[model]
+d_model = 512
+n_layers = 12
+n_heads = 8
+d_ff = 2048
+ctx = 256
+vocab = 4736
+dropout = 0.1
+
+[data]
+shards_dir = "data/minigpt/shards"
+tokenizer = "policy-v1"
+bos_token = 4672
+pad_token = 4673
+length_buckets = 8
+
+# Horizon arithmetic: micro_batch 64 x grad_accum 4 = 256 whole games per optimizer
+# step (rows are games padded within a length bucket, not packed 256-token rows).
+# The 2026-06+07 corpus is 11_172_722 train games / 876_242_928 tokens (~78 per
+# game), so one epoch is 11_172_722 / 256 ~= 43_644 steps at ~20k real tokens per
+# step. 77_000 steps sits at ~1.76 epochs (~1.55e9 trained tokens), and the frozen
+# cosine schedule is defined over exactly that horizon.
+[training]
+micro_batch = 64
+grad_accum = 4
+total_steps = 77000
+segment_steps = 1000
+learning_rate = 0.0003
+minimum_learning_rate = 0.00003
+warmup_fraction = 0.02
+weight_decay = 0.1
+gradient_clip = 1.0
+eval_interval_steps = 500
+eval_batches = 32
+checkpoint_interval_steps = 500
+early_stop_patience_evals = 8
+checkpoint_keep_last = 2
+checkpoint_milestone_every_steps = 5000
+disk_floor_bytes = 53687091200
+device = "cuda"
+amp = true
+deterministic = true
+
+[export]
+opset = 17
+dtype = "float32"
+parity_atol = 0.001
+parity_rtol = 0.0
+decode_temperature = 0.5
+
+[operations]
+heartbeat_seconds = 30

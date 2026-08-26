@@ -1,0 +1,44 @@
+[package]
+name = "minigpt"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Move-sequence GPT tokenization, PGN dump ingest, and ONNX serving for chess"
+
+[features]
+default = []
+onnx = ["dep:ort"]
+
+[dependencies]
+alphamini = { path = "../alphamini", default-features = false }
+artifact-io = { path = "../artifact-io" }
+axum = { version = "0.8", features = ["json"] }
+chess-core = { path = "../chess-core" }
+clap = { version = "4.5", features = ["derive", "env"] }
+hex = "0.4"
+rand = "0.8"
+rand_chacha = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal", "sync"] }
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = ["std", "ndarray", "download-binaries", "tls-rustls"] }
+zstd = "0.13"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "minigpt-ingest"
+path = "src/bin/ingest.rs"
+
+[[bin]]
+name = "minigpt"
+path = "src/bin/server.rs"
+required-features = ["onnx"]
+
+[[bin]]
+name = "minigpt-fixtures"
+path = "src/bin/fixtures.rs"
+required-features = ["onnx"]

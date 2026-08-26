@@ -9,4 +9,5 @@ members = [
     "calibrate",
     "alphamini",
     "artifact-io",
+    "minigpt",
 ]

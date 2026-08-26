@@ -25,10 +25,17 @@ pub enum Status {
 impl Board {
     /// Apply a move to the Board, recording it in `san_history` as SAN
     pub fn make_move(&mut self, mv: Move) {
+        let legal_moves: Vec<Move> = self.get_legal_moves();
+        self.make_move_with_legal_moves(mv, &legal_moves);
+    }
+
+    /// [`make_move`](Self::make_move) for a caller that already holds the legal
+    /// moves of the pre-move position, which are what SAN disambiguation reads.
+    pub(crate) fn make_move_with_legal_moves(&mut self, mv: Move, legal_moves: &[Move]) {
         // Compute the move text against the pre-move position (for capture,
         // disambiguation), apply the move, then add the check/mate suffix from
         // the resulting position where `side_to_move` is now the opponent
-        let body: String = self.san_body(mv);
+        let body: String = self.san_body_with_legal_moves(mv, legal_moves);
         self.apply_move(mv);
         self.record_current_position();
         let suffix: &str = match self.status() {
@@ -229,9 +236,7 @@ impl Board {
                 continue;
             }
 
-            let mut next = self.clone();
-            next.san_history.clear();
-            next.position_history.clear();
+            let mut next = self.without_history();
             next.apply_move(Move {
                 piece: pawn,
                 start_square: from,
@@ -254,9 +259,15 @@ impl Board {
         let me: Color = self.side_to_move;
         let mut legal_moves: Vec<Move> = Vec::new();
 
+        // The check test below reads only piece placement, and `apply_move`
+        // never touches the histories, so probe on a history-free copy. Cloning
+        // the SAN and repetition strings once per candidate would make one call
+        // cost O(plies played) for state nothing here looks at.
+        let probe: Board = self.without_history();
+
         // A pseudo-legal move is legal only if it doesn't leave our king in check
         for mv in self.pseudo_legal_moves() {
-            let mut next: Board = self.clone();
+            let mut next: Board = probe.clone();
             next.apply_move(mv);
             if let Some(king) = next.find_king(me) {
                 if !next.is_attacked(king, me.opposite()) {
@@ -266,6 +277,22 @@ impl Board {
         }
 
         legal_moves
+    }
+
+    /// A copy of the chess state alone, with the SAN and repetition histories
+    /// dropped rather than cloned. Only valid for questions that do not consult
+    /// history, such as whether a move leaves the mover's king in check.
+    fn without_history(&self) -> Board {
+        Board {
+            squares: self.squares,
+            side_to_move: self.side_to_move,
+            castling: self.castling,
+            en_passant: self.en_passant,
+            halfmove_clock: self.halfmove_clock,
+            fullmove_number: self.fullmove_number,
+            san_history: Vec::new(),
+            position_history: Vec::new(),
+        }
     }
 
     /// Whether the side to move is currently in check
