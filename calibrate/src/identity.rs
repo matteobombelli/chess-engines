@@ -158,6 +158,22 @@ pub fn analysis_config_sha256(experiment: &AnalysisExperimentV2) -> Result<Strin
             framing.u32(b"bot.root_noise_fraction_ppm", *root_noise_fraction_ppm);
             framing.string(b"bot.evaluator", evaluator)?;
         }
+        AnalysisBotV2::MiniGpt {
+            model_sha256,
+            manifest_sha256,
+            context,
+            temperature_ppm,
+            seed,
+            evaluator,
+        } => {
+            framing.variant(b"bot", b"mini_gpt")?;
+            framing.digest(b"bot.model_sha256", model_sha256)?;
+            framing.digest(b"bot.manifest_sha256", manifest_sha256)?;
+            framing.usize(b"bot.context", *context)?;
+            framing.u32(b"bot.temperature_ppm", *temperature_ppm);
+            framing.u64(b"bot.seed", *seed);
+            framing.string(b"bot.evaluator", evaluator)?;
+        }
     }
 
     let AnalysisReferenceV2 {
@@ -454,6 +470,17 @@ mod tests {
                     evaluator: "onnxruntime-cpu-v1".to_string(),
                 },
                 "f60c4f09ab2f26147d847b915650c0303df7e84bbaf8c5ebd8fb4d8742d14cfa",
+            ),
+            (
+                AnalysisBotV2::MiniGpt {
+                    model_sha256: "78".repeat(32),
+                    manifest_sha256: "9a".repeat(32),
+                    context: 256,
+                    temperature_ppm: 500_000,
+                    seed: 7,
+                    evaluator: "onnxruntime-cpu-v1".to_string(),
+                },
+                "d83a326fb7348eb600df8d4b906328422ce7b848789177ecce0536af7c5e3a25",
             ),
         ];
 

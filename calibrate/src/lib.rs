@@ -156,6 +156,17 @@ pub enum AnalysisBotV2 {
         root_noise_fraction_ppm: u32,
         evaluator: String,
     },
+    MiniGpt {
+        model_sha256: String,
+        manifest_sha256: String,
+        /// Position-embedding budget; a longer game loses its oldest moves.
+        context: usize,
+        /// Effective sampling temperature in millionths, avoiding float JSON
+        /// and equality ambiguity in the experiment identity.
+        temperature_ppm: u32,
+        seed: u64,
+        evaluator: String,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]

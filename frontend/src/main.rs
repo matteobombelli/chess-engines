@@ -5,7 +5,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
+mod minigpt_training;
 mod training;
+use minigpt_training::MiniGptTrainingProgress;
 use training::TrainingProgress;
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
@@ -16,6 +18,7 @@ enum Model {
     MinimaxDepth3,
     MinimaxNineSeconds,
     AlphaMini,
+    MiniGpt,
 }
 
 impl Model {
@@ -25,6 +28,7 @@ impl Model {
             Self::MinimaxDepth3 => "Depth-3 Minimax",
             Self::MinimaxNineSeconds => "9-second Minimax",
             Self::AlphaMini => "AlphaMini",
+            Self::MiniGpt => "MiniGPT",
         }
     }
 
@@ -34,6 +38,7 @@ impl Model {
             Self::MinimaxDepth3 => "Searches three moves ahead and usually responds quickly.",
             Self::MinimaxNineSeconds => "Searches for up to nine seconds before each move.",
             Self::AlphaMini => "Uses a compact neural network and Monte Carlo tree search.",
+            Self::MiniGpt => "Predicts the next move from the whole game, without searching.",
         }
     }
 
@@ -43,6 +48,7 @@ impl Model {
             Self::MinimaxDepth3 => "Minimax · depth 3",
             Self::MinimaxNineSeconds => "Minimax · 9 seconds",
             Self::AlphaMini => "AlphaMini",
+            Self::MiniGpt => "MiniGPT",
         }
     }
 
@@ -52,6 +58,7 @@ impl Model {
             Self::MinimaxDepth3 => "≈1640 Elo",
             Self::MinimaxNineSeconds => "≈2050 Elo",
             Self::AlphaMini => "≈1970 Elo",
+            Self::MiniGpt => "≈1930 Elo",
         }
     }
 
@@ -61,6 +68,7 @@ impl Model {
             Self::MinimaxDepth3 => "/projects/chessengines/api/minimax/depth-3/move",
             Self::MinimaxNineSeconds => "/projects/chessengines/api/minimax/move",
             Self::AlphaMini => "/projects/chessengines/api/alphamini/move",
+            Self::MiniGpt => "/projects/chessengines/api/minigpt/move",
         }
     }
 }
@@ -382,6 +390,7 @@ fn App() -> impl IntoView {
                                     Model::MinimaxDepth3,
                                     Model::MinimaxNineSeconds,
                                     Model::AlphaMini,
+                                    Model::MiniGpt,
                                 ]
                                     .into_iter()
                                     .map(|model| view! {
@@ -589,6 +598,42 @@ fn App() -> impl IntoView {
                         </div>
 
                         <TrainingProgress/>
+                    </section>
+                }.into_any(),
+                Model::MiniGpt => view! {
+                    <section class="about-model" id="about-model" aria-labelledby="about-model-title">
+                        <div class="about-heading">
+                            <div>
+                                <p class="eyebrow">"ABOUT THE ENGINE"</p>
+                                <h2 id="about-model-title">"MiniGPT"</h2>
+                            </div>
+                            <p class="about-intro">
+                                "MiniGPT is a 40-million-parameter GPT that predicts the next move from the whole game, trained on 11 million strong Lichess games. It does not search: it reads the moves played so far and answers with the move it expects to come next."
+                            </p>
+                        </div>
+
+                        <div class="about-details">
+                            <article>
+                                <h3>"Prediction"</h3>
+                                <p>
+                                    "Every game is a sequence of move tokens. A decoder-only transformer reads that sequence and scores each possible next move in one forward pass, so a reply takes milliseconds rather than seconds."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Rules"</h3>
+                                <p>
+                                    "Rust still generates the legal moves and keeps every illegal option out of the choice. The model only ranks moves the rules already allow; it never invents or applies one itself."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Rating"</h3>
+                                <p>
+                                    "Calibrated at about 1930 on the Chess.com 30+0 move-quality scale, using the same Stockfish reference method as the other engines — within the confidence interval of AlphaMini, from a single millisecond forward pass instead of a nine-second search."
+                                </p>
+                            </article>
+                        </div>
+
+                        <MiniGptTrainingProgress/>
                     </section>
                 }.into_any(),
             }}
@@ -877,10 +922,21 @@ mod tests {
         assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1640 Elo");
         assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2050 Elo");
         assert_eq!(Model::AlphaMini.elo_label(), "≈1970 Elo");
+        assert_eq!(Model::MiniGpt.elo_label(), "≈1930 Elo");
         assert_eq!(
             Model::AlphaMini.url(),
             "/projects/chessengines/api/alphamini/move"
         );
+    }
+
+    #[test]
+    fn minigpt_is_offered_with_its_calibrated_rating() {
+        assert_eq!(Model::MiniGpt.elo_label(), "≈1930 Elo");
+        assert_eq!(
+            Model::MiniGpt.url(),
+            "/projects/chessengines/api/minigpt/move"
+        );
+        assert_eq!(Model::MiniGpt.selector_label(), "MiniGPT");
     }
 
     #[test]

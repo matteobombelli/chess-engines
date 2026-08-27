@@ -93,6 +93,28 @@ Depth-3 baseline calibrates to about 1640 with a wide interval from at or below
 1400 to 1780; see its [calibration report](calibrate/DEPTH_THREE_RESULTS.md).
 Both are historical-position move-quality estimates, not full-game ratings.
 
+## MiniGPT
+
+`minigpt` is a 40M-parameter decoder-only GPT that plays chess by predicting
+the next move rather than by searching. It is trained on 11.2 million strong
+Lichess games — both players at least 2000, Blitz/Rapid/Classical, cleanly
+terminated — tokenized as `BOS` plus one move token per ply over the same
+`policy-v1` action space AlphaMini uses.
+
+Rust owns rules, SAN replay, corpus ingest, token shards, CPU ONNX serving, and
+decoding. Python owns the transformer, optimization, crash-safe checkpoints,
+ONNX export, and the run ledger. It has no search: the model produces one
+distribution per position and a **legality mask** decides what that
+distribution may mean, so — like every other engine here — it can only ever
+play a move `chess-core` already generated.
+
+Start with the [current status and continuation handoff](docs/minigpt/status.md),
+then read the [design](docs/minigpt/design.md) and follow the
+[training runbook](docs/minigpt/training-runbook.md). The dated engineering
+record, including the corpus measurements and the pilot, is in the
+[implementation log](docs/minigpt/implementation-log.md). The v1 run is in
+progress; it is not yet evaluated, calibrated, or deployed.
+
 ## Deploy
 
 From the production checkout, fetch, fast-forward, and deploy the exact commit

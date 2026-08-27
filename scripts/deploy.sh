@@ -11,6 +11,9 @@ MINIMAX_SERVICE_NAME="${CHESSENGINES_MINIMAX_SERVICE:-chessengines-minimax.servi
 ALPHAMINI_SERVICE_NAME="${CHESSENGINES_ALPHAMINI_SERVICE:-chessengines-alphamini.service}"
 ALPHAMINI_MODEL_PATH="${ALPHAMINI_MODEL_PATH:-$REPO_ROOT/artifacts/alphamini/current/model.onnx}"
 ALPHAMINI_MANIFEST_PATH="${ALPHAMINI_MANIFEST_PATH:-$REPO_ROOT/artifacts/alphamini/current/manifest.json}"
+MINIGPT_SERVICE_NAME="${CHESSENGINES_MINIGPT_SERVICE:-chessengines-minigpt.service}"
+MINIGPT_MODEL_PATH="${MINIGPT_MODEL_PATH:-$REPO_ROOT/artifacts/minigpt/current/model.onnx}"
+MINIGPT_MANIFEST_PATH="${MINIGPT_MANIFEST_PATH:-$REPO_ROOT/artifacts/minigpt/current/manifest.json}"
 LIVE_URL="${CHESSENGINES_LIVE_URL:-https://apps.matteob.dev/projects/chessengines/}"
 CADDY_CONFIG="${CHESSENGINES_CADDY_CONFIG:-/etc/caddy/Caddyfile}"
 CARGO_COMMAND="${CARGO_COMMAND:-$HOME/.cargo/bin/cargo}"
@@ -40,6 +43,7 @@ check_proxy_config() {
         "handle_path /projects/chessengines/api/random/*"
         "handle_path /projects/chessengines/api/minimax/*"
         "handle_path /projects/chessengines/api/alphamini/*"
+        "handle_path /projects/chessengines/api/minigpt/*"
     )
 
     if [[ ! -r "$CADDY_CONFIG" ]]; then
@@ -78,6 +82,15 @@ if [[ ! -r "$ALPHAMINI_MODEL_PATH" || ! -r "$ALPHAMINI_MANIFEST_PATH" ]]; then
     exit 1
 fi
 
+if [[ ! -r "$MINIGPT_MODEL_PATH" || ! -r "$MINIGPT_MANIFEST_PATH" ]]; then
+    echo "MiniGPT's immutable model artifact is not provisioned." >&2
+    echo "Expected readable files:" >&2
+    echo "  $MINIGPT_MODEL_PATH" >&2
+    echo "  $MINIGPT_MANIFEST_PATH" >&2
+    echo "Provision a manifest-validated checkpoint, then atomically switch artifacts/minigpt/current." >&2
+    exit 1
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
     echo "Refusing to deploy a dirty working tree. Commit or stash changes first." >&2
     exit 1
@@ -87,12 +100,18 @@ echo "Testing workspace..."
 "$CARGO_COMMAND" test --workspace --locked
 
 echo "Building bot APIs..."
-"$CARGO_COMMAND" build --locked --release -p random -p minimax -p alphamini --features alphamini/onnx
+"$CARGO_COMMAND" build --locked --release -p random -p minimax -p alphamini -p minigpt \
+    --features alphamini/onnx,minigpt/onnx
 
 echo "Verifying AlphaMini model and manifest..."
 ALPHAMINI_MODEL_PATH="$ALPHAMINI_MODEL_PATH" \
 ALPHAMINI_MANIFEST_PATH="$ALPHAMINI_MANIFEST_PATH" \
     target/release/alphamini --verify-only
+
+echo "Verifying MiniGPT model and manifest..."
+MINIGPT_MODEL_PATH="$MINIGPT_MODEL_PATH" \
+MINIGPT_MANIFEST_PATH="$MINIGPT_MANIFEST_PATH" \
+    target/release/minigpt --verify-only
 
 echo "Building frontend..."
 (
@@ -109,11 +128,13 @@ fi
 echo "Publishing frontend to $STATIC_ROOT..."
 rsync -a --delete frontend/dist/ "$STATIC_ROOT/"
 
-echo "Restarting $RANDOM_SERVICE_NAME, $MINIMAX_SERVICE_NAME, and $ALPHAMINI_SERVICE_NAME..."
-systemctl --user restart "$RANDOM_SERVICE_NAME" "$MINIMAX_SERVICE_NAME" "$ALPHAMINI_SERVICE_NAME"
+echo "Restarting $RANDOM_SERVICE_NAME, $MINIMAX_SERVICE_NAME, $ALPHAMINI_SERVICE_NAME, and $MINIGPT_SERVICE_NAME..."
+systemctl --user restart "$RANDOM_SERVICE_NAME" "$MINIMAX_SERVICE_NAME" "$ALPHAMINI_SERVICE_NAME" \
+    "$MINIGPT_SERVICE_NAME"
 systemctl --user is-active --quiet "$RANDOM_SERVICE_NAME"
 systemctl --user is-active --quiet "$MINIMAX_SERVICE_NAME"
 systemctl --user is-active --quiet "$ALPHAMINI_SERVICE_NAME"
+systemctl --user is-active --quiet "$MINIGPT_SERVICE_NAME"
 
 echo "Verifying live page and API..."
 curl --fail --silent --show-error "$LIVE_URL" >/dev/null
@@ -133,5 +154,9 @@ curl --fail --silent --show-error --max-time 60 \
     -H "content-type: application/json" \
     --data '{"san":"1. e4 e5 2. Nf3"}' \
     "${LIVE_URL%/}/api/alphamini/move" >/dev/null
+curl --fail --silent --show-error --max-time 60 \
+    -H "content-type: application/json" \
+    --data '{"san":"1. e4 e5 2. Nf3"}' \
+    "${LIVE_URL%/}/api/minigpt/move" >/dev/null
 
 echo "Deployment complete: $LIVE_URL"

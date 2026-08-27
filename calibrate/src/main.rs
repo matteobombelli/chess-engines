@@ -10,8 +10,12 @@ use std::time::Duration;
 use alphamini::SearchConfig;
 #[cfg(feature = "alphamini")]
 use arena::AlphaMiniEngine;
+#[cfg(feature = "minigpt")]
+use arena::MiniGptEngine;
 use arena::{Engine, MinimaxEngine, RandomEngine};
 use artifact_io::publish_bytes_new;
+#[cfg(feature = "minigpt")]
+use calibrate::artifact::minigpt_bot_name;
 use calibrate::artifact::{
     stable_player_hash, validate_analysis_artifact, validate_analysis_artifacts,
 };
@@ -35,6 +39,8 @@ use rand::rngs::StdRng;
 const ALPHAMINI_CPU_EVALUATOR_V1: &str = "onnxruntime-cpu-v1";
 const ALPHAMINI_CPUCT_PPM: u32 = 1_500_000;
 const ALPHAMINI_FPU_REDUCTION_PPM: u32 = 250_000;
+#[cfg(feature = "minigpt")]
+const MINIGPT_CPU_EVALUATOR_V1: &str = "onnxruntime-cpu-v1";
 
 const HELP: &str = "\
 Estimate a bot's Chess.com 30+0 move-quality-equivalent rating.\n\
@@ -71,7 +77,7 @@ Options:\n\
   --corpus FILE       JSONL file produced by collect; repeatable (required)\n\
   --exclude-corpus FILE  Exclude humans found in this corpus; repeatable\n\
   --output FILE       New JSON analysis artifact (required)\n\
-  --bot BOT           random, minimax, or alphamini (required)\n\
+  --bot BOT           random, minimax, alphamini, or minigpt (required)\n\
   --minimax-depth N   Fixed depth when no time budget is set (default: 3)\n\
   --minimax-time-ms N Per-move Minimax budget; e.g. 9000 for production\n\
   --minimax-max-depth N  Timed-search depth ceiling (default: 64)\n\
@@ -81,6 +87,9 @@ Options:\n\
   --alphamini-simulations N  Per-position simulation cap (default: 10000)\n\
   --alphamini-time-ms N      Per-position wall-clock cap (default: 9000)\n\
   --alphamini-batch-size N   Leaf inference batch (default: 8)\n\
+  --minigpt-model FILE       Versioned ONNX model for --bot minigpt\n\
+  --minigpt-manifest FILE    Matching checksum/schema manifest\n\
+  --minigpt-temperature X    Override the manifest sampling temperature\n\
   --stockfish PATH    UCI engine path (default: /usr/games/stockfish)\n\
   --nodes N           Stockfish nodes per search (default: 100000)\n\
   --hash-mb N         Stockfish hash size in MiB (default: 128)\n\
@@ -232,6 +241,9 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
         "alphamini-simulations",
         "alphamini-time-ms",
         "alphamini-batch-size",
+        "minigpt-model",
+        "minigpt-manifest",
+        "minigpt-temperature",
         "stockfish",
         "nodes",
         "hash-mb",
@@ -273,6 +285,9 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
     let alphamini_simulations = parsed.value_or("alphamini-simulations", 10_000_u32)?;
     let alphamini_time_ms = parsed.value_or("alphamini-time-ms", 9_000_u64)?;
     let alphamini_batch_size = parsed.value_or("alphamini-batch-size", 8_usize)?;
+    let minigpt_model = parsed.one("minigpt-model").map(PathBuf::from);
+    let minigpt_manifest = parsed.one("minigpt-manifest").map(PathBuf::from);
+    let minigpt_temperature: Option<f32> = parsed.optional_value("minigpt-temperature")?;
     let stockfish_path = parsed
         .one("stockfish")
         .map(PathBuf::from)
@@ -384,7 +399,16 @@ fn run_analyze(args: &[String]) -> Result<(), String> {
                 },
             )
         }
-        _ => return Err("--bot must be random, minimax, or alphamini".to_string()),
+        "minigpt" => {
+            let model = minigpt_model
+                .as_deref()
+                .ok_or("--minigpt-model is required for --bot minigpt")?;
+            let manifest = minigpt_manifest
+                .as_deref()
+                .ok_or("--minigpt-manifest is required for --bot minigpt")?;
+            make_minigpt(model, manifest, minigpt_temperature, bot_seed)?
+        }
+        _ => return Err("--bot must be random, minimax, alphamini, or minigpt".to_string()),
     };
     let stockfish_binary_sha256 = sha256_file_hex(&stockfish_path)?;
     let calibration_binary_sha256 = sha256_running_executable()?;
@@ -711,6 +735,49 @@ fn make_alphamini(
 ) -> Result<(Box<dyn Engine>, String), String> {
     Err(
         "AlphaMini calibration requires `cargo run -p calibrate --release --features alphamini -- ...`"
+            .to_string(),
+    )
+}
+
+/// Unlike [`make_alphamini`], this also returns the bot identity: the effective
+/// context and temperature come from the validated manifest, so building the
+/// record here avoids loading and re-validating the model a second time.
+#[cfg(feature = "minigpt")]
+fn make_minigpt(
+    model: &Path,
+    manifest: &Path,
+    temperature: Option<f32>,
+    seed: u64,
+) -> Result<(Box<dyn Engine>, String, AnalysisBotV2), String> {
+    let model_sha256 = sha256_file_hex(model)?;
+    let manifest_sha256 = sha256_file_hex(manifest)?;
+    let engine = MiniGptEngine::load(model, manifest, temperature, seed)?;
+    let temperature_ppm = (f64::from(engine.temperature()) * 1_000_000.0).round() as u32;
+    let context = engine.context();
+    let name = minigpt_bot_name(&model_sha256[..12], context, temperature_ppm);
+    Ok((
+        Box::new(engine),
+        name,
+        AnalysisBotV2::MiniGpt {
+            model_sha256,
+            manifest_sha256,
+            context,
+            temperature_ppm,
+            seed,
+            evaluator: MINIGPT_CPU_EVALUATOR_V1.to_string(),
+        },
+    ))
+}
+
+#[cfg(not(feature = "minigpt"))]
+fn make_minigpt(
+    _model: &Path,
+    _manifest: &Path,
+    _temperature: Option<f32>,
+    _seed: u64,
+) -> Result<(Box<dyn Engine>, String, AnalysisBotV2), String> {
+    Err(
+        "MiniGPT calibration requires `cargo run -p calibrate --release --features minigpt -- ...`"
             .to_string(),
     )
 }

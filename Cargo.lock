@@ -108,6 +108,7 @@ dependencies = [
  "alphamini",
  "artifact-io",
  "chess-core",
+ "minigpt",
  "minimax",
  "rand",
  "random",

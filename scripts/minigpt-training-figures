@@ -1,0 +1,564 @@
+#!/usr/bin/env python3
+"""Render MiniGPT's metrics.jsonl as a compiled-in Leptos/SVG training figure.
+
+Usage:
+    scripts/minigpt-training-figures runs/minigpt-v1/metrics.jsonl 77000 \
+      > frontend/src/minigpt_training.rs
+
+The output mirrors `frontend/src/training.rs`: point-string consts plus one
+`#[component]` that emits the same markup and CSS classes, so it inherits the
+existing chart styling with no new CSS.
+
+Deterministic: the same metrics file and horizon always produce byte-identical
+output. Re-run it when the training run finishes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import math
+import sys
+from pathlib import Path
+from typing import Callable, Iterable, Sequence
+
+# --- Geometry lifted from frontend/src/training.rs -------------------------
+#
+# WIDE is AlphaMini's total-loss chart: a 720x260 viewBox whose plot area stops
+# at x=602 so the end labels fit in the remaining width. SHORT is its
+# learning-rate chart: a 720x150 viewBox using the full width.
+
+
+class Geometry:
+    def __init__(
+        self,
+        view_w: int,
+        view_h: int,
+        x0: float,
+        x1: float,
+        baseline_y: float,
+        top_y: float,
+        bottom_pad: float,
+        y_label_x: float,
+        x_label_y: float,
+    ) -> None:
+        self.view_w = view_w
+        self.view_h = view_h
+        self.x0 = x0
+        self.x1 = x1
+        self.baseline_y = baseline_y
+        self.top_y = top_y
+        # Lowest y a data point may reach, keeping the curve off the baseline
+        # rule the way AlphaMini's charts do.
+        self.band_bottom = baseline_y - bottom_pad
+        self.y_label_x = y_label_x
+        self.x_label_y = x_label_y
+
+
+WIDE = Geometry(720, 260, 42.0, 602.0, 232.0, 18.5, 10.0, 34.0, 250.0)
+SHORT = Geometry(720, 150, 42.0, 704.0, 122.0, 17.2, 10.0, 34.0, 140.0)
+
+TICK_DY = 4.0
+MAX_POINTS = 180
+# Minimum vertical gap between the two end labels on the loss chart.
+LABEL_SEPARATION = 13.0
+
+NICE_CEILINGS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 7.5, 10.0)
+NICE_STEPS = (1.0, 2.0, 2.5, 5.0, 10.0)
+
+
+def nice_ceiling(value: float) -> float:
+    """The smallest round number at or above `value`."""
+
+    if value <= 0.0:
+        return 1.0
+    base = 10.0 ** math.floor(math.log10(value))
+    for candidate in NICE_CEILINGS:
+        if value <= candidate * base * (1.0 + 1e-12):
+            return candidate * base
+    return 10.0 * base
+
+
+def tick_step(span: float, target_intervals: int) -> float:
+    if span <= 0.0:
+        return 1.0
+    raw = span / target_intervals
+    base = 10.0 ** math.floor(math.log10(raw))
+    for candidate in NICE_STEPS:
+        if raw <= candidate * base * (1.0 + 1e-12):
+            return candidate * base
+    return 10.0 * base
+
+
+def coordinate(value: float) -> str:
+    if abs(value) < 0.05:
+        value = 0.0
+    text = f"{value:.1f}"
+    return text[:-2] if text.endswith(".0") else text
+
+
+def read_metrics(path: Path) -> list[dict]:
+    """Latest record per step, ordered by step.
+
+    metrics.jsonl is append-only and a recovered segment can re-emit a step it
+    already reported, so the last record for a step wins.
+    """
+
+    by_step: dict[int, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        record = json.loads(line)
+        step = record.get("step")
+        if isinstance(step, int):
+            by_step[step] = record
+    return [by_step[step] for step in sorted(by_step)]
+
+
+def downsample(records: Sequence[dict], limit: int = MAX_POINTS) -> list[dict]:
+    """Evenly spaced records, always keeping the first and the last."""
+
+    if len(records) <= limit:
+        return list(records)
+    last = len(records) - 1
+    indices = sorted({round(index * last / (limit - 1)) for index in range(limit)})
+    return [records[index] for index in indices]
+
+
+class Series:
+    def __init__(self, name: str, field: str, records: Sequence[dict]) -> None:
+        self.name = name
+        self.points = [
+            (float(record["step"]), float(record[field]))
+            for record in records
+            if isinstance(record.get(field), (int, float))
+        ]
+
+    @property
+    def values(self) -> list[float]:
+        return [value for _, value in self.points]
+
+
+class Axis:
+    """Maps values onto a geometry's vertical band."""
+
+    def __init__(self, geometry: Geometry, low: float, high: float, bottom: float) -> None:
+        self.geometry = geometry
+        self.low = low
+        self.high = high
+        self.bottom = bottom
+        self.span = high - low if high > low else 1.0
+
+    def y(self, value: float) -> float:
+        fraction = (value - self.low) / self.span
+        return self.bottom - fraction * (self.bottom - self.geometry.top_y)
+
+
+def padded_axis(geometry: Geometry, values: Iterable[float]) -> Axis:
+    collected = list(values)
+    low = min(collected)
+    high = max(collected)
+    if high <= low:
+        high = low + max(abs(low), 1.0) * 0.1
+    pad = (high - low) * 0.08
+    return Axis(geometry, low - pad, high + pad, geometry.band_bottom)
+
+
+def zero_anchored_axis(geometry: Geometry, values: Iterable[float]) -> Axis:
+    """Zero sits exactly on the baseline, as it does on AlphaMini's LR chart."""
+
+    return Axis(geometry, 0.0, nice_ceiling(max(values)), geometry.baseline_y)
+
+
+def y_ticks(axis: Axis, target_intervals: int = 3) -> list[float]:
+    step = tick_step(axis.span, target_intervals)
+    ticks: list[float] = []
+    index = math.ceil(axis.low / step - 1e-9)
+    while True:
+        value = index * step
+        if value > axis.high + 1e-9:
+            break
+        if value > axis.low + 1e-9:
+            ticks.append(value)
+        index += 1
+    return ticks
+
+
+def x_ticks(total_steps: int) -> list[float]:
+    step = tick_step(float(total_steps), 6)
+    ticks = []
+    value = 0.0
+    while value <= total_steps + 1e-9:
+        ticks.append(value)
+        value += step
+    if ticks[-1] < total_steps * (1.0 - 1e-9):
+        ticks.append(float(total_steps))
+    return ticks
+
+
+def x_of(geometry: Geometry, step: float, total_steps: int) -> float:
+    fraction = step / total_steps if total_steps else 0.0
+    return geometry.x0 + fraction * (geometry.x1 - geometry.x0)
+
+
+def format_step(value: float) -> str:
+    if value < 1000:
+        return f"{int(round(value))}"
+    return f"{value / 1000:g}k"
+
+
+def format_loss(value: float) -> str:
+    return f"{value:.1f}"
+
+
+def format_percent(value: float) -> str:
+    return f"{value * 100:.0f}%"
+
+
+def format_rate(value: float) -> str:
+    if value <= 0.0:
+        return "0"
+    exponent = math.floor(math.log10(value))
+    mantissa = value / (10.0**exponent)
+    return f"{mantissa:.3g}e{exponent}"
+
+
+def points_attribute(geometry: Geometry, axis: Axis, series: Series, total_steps: int) -> str:
+    return " ".join(
+        f"{coordinate(x_of(geometry, step, total_steps))},{coordinate(axis.y(value))}"
+        for step, value in series.points
+    )
+
+
+def rust_string(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def axis_markup(
+    geometry: Geometry,
+    axis: Axis,
+    total_steps: int,
+    y_format: Callable[[float], str],
+    *,
+    label_zero: bool = False,
+) -> list[str]:
+    lines: list[str] = []
+    for tick in y_ticks(axis):
+        y = coordinate(axis.y(tick))
+        lines.append(
+            f'<line class="grid" x1="{coordinate(geometry.x0)}" '
+            f'x2="{coordinate(geometry.x1)}" y1="{y}" y2="{y}"></line>'
+        )
+    lines.append(
+        f'<line class="baseline" x1="{coordinate(geometry.x0)}" '
+        f'x2="{coordinate(geometry.x1)}" y1="{coordinate(geometry.baseline_y)}" '
+        f'y2="{coordinate(geometry.baseline_y)}"></line>'
+    )
+    for tick in y_ticks(axis):
+        y = coordinate(axis.y(tick) + TICK_DY)
+        lines.append(
+            f'<text class="tick" x="{coordinate(geometry.y_label_x)}" y="{y}" '
+            f"text-anchor=\"end\">{rust_string(y_format(tick))}</text>"
+        )
+    if label_zero:
+        lines.append(
+            f'<text class="tick" x="{coordinate(geometry.y_label_x)}" '
+            f'y="{coordinate(geometry.baseline_y + TICK_DY)}" text-anchor="end">"0"</text>'
+        )
+    for tick in x_ticks(total_steps):
+        lines.append(
+            f'<text class="tick" x="{coordinate(x_of(geometry, tick, total_steps))}" '
+            f'y="{coordinate(geometry.x_label_y)}" text-anchor="middle">'
+            f"{rust_string(format_step(tick))}</text>"
+        )
+    return lines
+
+
+def indent(lines: Iterable[str], spaces: int) -> str:
+    pad = " " * spaces
+    return "\n".join(pad + line for line in lines)
+
+
+def build(metrics_path: Path, total_steps: int) -> str:
+    records = read_metrics(metrics_path)
+    if not records:
+        raise SystemExit(f"{metrics_path} contains no metrics records")
+    sampled = downsample(records)
+
+    train = Series("train_loss", "train_loss", sampled)
+    validation = Series("validation_loss", "validation_loss", sampled)
+    top1 = Series("validation_top1", "validation_top1", sampled)
+    learning_rate = Series("learning_rate", "learning_rate", sampled)
+    for series in (train, validation, top1, learning_rate):
+        if not series.points:
+            raise SystemExit(f"{metrics_path} has no usable {series.name} values")
+
+    loss_axis = padded_axis(WIDE, train.values + validation.values)
+    top1_axis = padded_axis(SHORT, top1.values)
+    lr_axis = zero_anchored_axis(SHORT, learning_rate.values)
+
+    consts = [
+        ("TRAIN_LOSS_PTS", points_attribute(WIDE, loss_axis, train, total_steps)),
+        ("VAL_LOSS_PTS", points_attribute(WIDE, loss_axis, validation, total_steps)),
+        ("TOP1_PTS", points_attribute(SHORT, top1_axis, top1, total_steps)),
+        ("LR_PTS", points_attribute(SHORT, lr_axis, learning_rate, total_steps)),
+    ]
+
+    last = records[-1]
+    first = records[0]
+    completed = int(last["step"])
+    progress = completed / total_steps
+    best_loss = float(last.get("best_validation_loss", last["validation_loss"]))
+    best_step = int(last.get("best_validation_step", completed))
+    in_progress = completed < total_steps
+
+    # End markers sit at the final sample, not at the axis end: a mid-run
+    # export stops well short of the horizon.
+    end_x = x_of(WIDE, train.points[-1][0], total_steps)
+    train_y = loss_axis.y(train.points[-1][1])
+    val_y = loss_axis.y(validation.points[-1][1])
+    if abs(train_y - val_y) < LABEL_SEPARATION:
+        middle = (train_y + val_y) / 2.0
+        half = LABEL_SEPARATION / 2.0
+        if train_y >= val_y:
+            train_y, val_y = middle + half, middle - half
+        else:
+            train_y, val_y = middle - half, middle + half
+
+    horizon = f"{total_steps:,}"
+    intro_progress = (
+        f"This run is still in flight: {completed:,} of {horizon} steps are plotted below."
+        if in_progress
+        else f"The run completed its full {horizon}-step horizon."
+    )
+    sampling_note = (
+        f" One point per evaluation, {len(records):,} evaluations downsampled to {len(sampled):,}."
+        if len(sampled) < len(records)
+        else " One point per evaluation, every 500 steps."
+    )
+
+    loss_label = (
+        f"Training and validation loss against optimizer step. "
+        f"Validation falls from {first['validation_loss']:.2f} to "
+        f"{last['validation_loss']:.2f} over {completed:,} of {horizon} steps."
+    )
+    top1_label = (
+        f"Validation top-1 move accuracy against optimizer step. It rises from "
+        f"{first['validation_top1'] * 100:.1f}% to {last['validation_top1'] * 100:.1f}%."
+    )
+    lr_label = (
+        f"Learning rate against optimizer step. It warms up to "
+        f"{format_rate(max(learning_rate.values))}, then decays on a cosine defined over "
+        f"the frozen {horizon}-step horizon."
+    )
+
+    out: list[str] = []
+    out.append("// Generated by scripts/minigpt-training-figures. Do not edit by hand.")
+    out.append("//")
+    out.append(f"//     scripts/minigpt-training-figures {metrics_path} {total_steps} \\")
+    out.append("//       > frontend/src/minigpt_training.rs")
+    out.append("//")
+    out.append("// MOUNT INSTRUCTION: add this one line to main.rs, inside the")
+    out.append("// `Model::MiniGpt => view! { <section class=\"about-model\" ...>` arm, in the")
+    out.append("// same position `<TrainingProgress/>` occupies in the `Model::AlphaMini` arm:")
+    out.append("//")
+    out.append("//     <MiniGptTrainingProgress/>")
+    out.append("//")
+    out.append("// The module is declared in main.rs but not yet rendered, because the")
+    out.append("// `Model::MiniGpt` arm does not exist in this tree yet. Drop the")
+    out.append("// `allow(dead_code)` below once the component is mounted.")
+    out.append("")
+    out.append("#![allow(dead_code)]")
+    out.append("")
+    out.append("use leptos::prelude::*;")
+    out.append("")
+    for name, value in consts:
+        out.append(f"const {name}: &str = {rust_string(value)};")
+        out.append("")
+    out.append("#[component]")
+    out.append("pub fn MiniGptTrainingProgress() -> impl IntoView {")
+    out.append("    view! {")
+    out.append('        <div class="training">')
+    out.append('            <div class="training-heading">')
+    out.append('                <h3>"Training progress"</h3>')
+    out.append('                <div class="training-intro">')
+    out.append("                    <p>")
+    out.append(
+        "                        "
+        + rust_string(
+            "MiniGPT is trained once, on 11.2 million strong human games, to predict the "
+            "move a strong player would make next. There is no self-play and no search: "
+            "every point below is one pass of the optimizer over more of the same corpus. "
+            + intro_progress
+        )
+    )
+    out.append("                    </p>")
+    out.append("                    <p>")
+    out.append(
+        "                        "
+        + rust_string(
+            "Loss measures how surprised the model is by the move that was actually "
+            "played. Lower is better, and the validation curve is measured on games the "
+            "optimizer never sees."
+        )
+    )
+    out.append("                    </p>")
+    out.append("                </div>")
+    out.append("            </div>")
+    out.append("")
+    out.append('            <dl class="training-stats">')
+    for title, value, note in [
+        (
+            "Training steps",
+            f"{completed:,} / {horizon}",
+            f"{progress * 100:.1f}% of the frozen horizon. One step is 256 whole games, "
+            "about 20,000 real move tokens.",
+        ),
+        (
+            "Train loss",
+            f"{first['train_loss']:.2f} → {last['train_loss']:.2f}",
+            "Loss on the batches the optimizer is updating on, one point per evaluation.",
+        ),
+        (
+            "Validation loss",
+            f"{first['validation_loss']:.2f} → {last['validation_loss']:.2f}",
+            f"The same loss on held-out games. Its best value, {best_loss:.2f}, "
+            f"came at step {best_step:,}.",
+        ),
+        (
+            "Move accuracy",
+            f"{last['validation_top1'] * 100:.1f}%",
+            "How often the single highest-scoring legal move is the one the human "
+            "actually played, on held-out games.",
+        ),
+    ]:
+        out.append("                <div>")
+        out.append(f"                    <dt>{rust_string(title)}</dt>")
+        out.append(f'                    <dd class="stat-value">{rust_string(value)}</dd>')
+        out.append('                    <dd class="stat-note">')
+        out.append("                        " + rust_string(note))
+        out.append("                    </dd>")
+        out.append("                </div>")
+    out.append("            </dl>")
+    out.append("")
+    out.append('            <div class="chart-legend" aria-hidden="true">')
+    out.append('                <span><i class="key key-train"></i>"train"</span>')
+    out.append('                <span><i class="key key-val"></i>"validation"</span>')
+    out.append("            </div>")
+    out.append("")
+
+    # Panel (a): train and validation loss.
+    out.append('            <figure class="chart">')
+    out.append(
+        f'                <svg viewBox="0 0 {WIDE.view_w} {WIDE.view_h}" role="img" '
+        f"aria-label={rust_string(loss_label)}>"
+    )
+    out.append(indent(axis_markup(WIDE, loss_axis, total_steps, format_loss), 20))
+    out.append('                    <polyline class="series-val" points=VAL_LOSS_PTS></polyline>')
+    out.append(
+        '                    <polyline class="series-train" points=TRAIN_LOSS_PTS></polyline>'
+    )
+    out.append(
+        f'                    <circle class="dot-val" cx="{coordinate(end_x)}" '
+        f'cy="{coordinate(loss_axis.y(validation.points[-1][1]))}" r="4"></circle>'
+    )
+    out.append(
+        f'                    <circle class="dot-train" cx="{coordinate(end_x)}" '
+        f'cy="{coordinate(loss_axis.y(train.points[-1][1]))}" r="4"></circle>'
+    )
+    val_end_label = rust_string("validation {:.2f}".format(last["validation_loss"]))
+    train_end_label = rust_string("train {:.2f}".format(last["train_loss"]))
+    out.append(
+        f'                    <text class="end-label" x="{coordinate(end_x + 10)}" '
+        f'y="{coordinate(val_y + TICK_DY)}">{val_end_label}</text>'
+    )
+    out.append(
+        f'                    <text class="end-label" x="{coordinate(end_x + 10)}" '
+        f'y="{coordinate(train_y + TICK_DY)}">{train_end_label}</text>'
+    )
+    out.append("                </svg>")
+    out.append("                <figcaption>")
+    out.append('                    <strong>"Loss."</strong>')
+    out.append(
+        "                    "
+        + rust_string(
+            " How surprised the model is by the move that was played."
+            + sampling_note
+            + " Train and validation track each other closely, which is what a single"
+            " pass over a corpus this large should look like: the model has not seen"
+            " enough of any position to memorize it."
+        )
+    )
+    out.append("                </figcaption>")
+    out.append("            </figure>")
+    out.append("")
+
+    # Panel (b): validation top-1 accuracy.
+    out.append('            <figure class="chart">')
+    out.append(
+        f'                <svg viewBox="0 0 {SHORT.view_w} {SHORT.view_h}" role="img" '
+        f"aria-label={rust_string(top1_label)}>"
+    )
+    out.append(indent(axis_markup(SHORT, top1_axis, total_steps, format_percent), 20))
+    out.append('                    <polyline class="series-val" points=TOP1_PTS></polyline>')
+    out.append("                </svg>")
+    out.append("                <figcaption>")
+    out.append('                    <strong>"Move accuracy."</strong>')
+    out.append(
+        "                    "
+        + rust_string(
+            " How often the model's single best legal move is the one the human actually"
+            " played, on held-out games. A perfect score is not the goal: strong players"
+            " disagree with each other constantly, so most of the remaining gap is real"
+            " choice rather than error."
+        )
+    )
+    out.append("                </figcaption>")
+    out.append("            </figure>")
+    out.append("")
+
+    # Panel (c): learning rate.
+    out.append('            <figure class="chart">')
+    out.append(
+        f'                <svg viewBox="0 0 {SHORT.view_w} {SHORT.view_h}" role="img" '
+        f"aria-label={rust_string(lr_label)}>"
+    )
+    out.append(indent(axis_markup(SHORT, lr_axis, total_steps, format_rate, label_zero=True), 20))
+    out.append('                    <polyline class="series-train" points=LR_PTS></polyline>')
+    out.append("                </svg>")
+    out.append("                <figcaption>")
+    out.append('                    <strong>"Learning rate."</strong>')
+    out.append(
+        "                    "
+        + rust_string(
+            " The size of each weight update. It rises over the first 2% of the horizon,"
+            " then follows a cosine decay defined over exactly the frozen step count, so"
+            " late updates only make small adjustments. Changing the horizon would change"
+            " the schedule, and therefore the model."
+        )
+    )
+    out.append("                </figcaption>")
+    out.append("            </figure>")
+    out.append("        </div>")
+    out.append("    }")
+    out.append("}")
+    out.append("")
+    return "\n".join(out)
+
+
+def main(argv: Sequence[str]) -> int:
+    parser = argparse.ArgumentParser(
+        description="Render MiniGPT metrics.jsonl as a Leptos training-figure module."
+    )
+    parser.add_argument("metrics", type=Path, help="path to a run's metrics.jsonl")
+    parser.add_argument("total_steps", type=int, help="the run's frozen training.total_steps")
+    arguments = parser.parse_args(argv)
+    if arguments.total_steps <= 0:
+        parser.error("total_steps must be positive")
+    sys.stdout.write(build(arguments.metrics, arguments.total_steps))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

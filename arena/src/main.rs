@@ -30,11 +30,12 @@ use arena::{
     elo_from_score, paired_score_bootstrap_95, run_match_with_progress,
     run_paired_match_with_progress,
 };
+#[cfg(any(feature = "alphamini", feature = "minigpt"))]
+use arena::{Engine, PositionRandomEngine};
 #[cfg(feature = "alphamini")]
-use arena::{
-    Engine, GameResult, OpeningPairResult, PositionRandomEngine, Termination,
-    paired_report_from_results,
-};
+use arena::{GameResult, OpeningPairResult, Termination, paired_report_from_results};
+#[cfg(feature = "minigpt")]
+use arena::{MiniGptEngine, Opening};
 #[cfg(feature = "alphamini")]
 use artifact_io::{publish_bytes_new, sha256_bytes, sha256_file};
 #[cfg(feature = "alphamini")]
@@ -57,12 +58,15 @@ Options:\n\
   --bootstrap N   Pair-bootstrap samples with --openings (default: 20000)\n\
   --alphamini-model FILE     Compare this ONNX model against Minimax (requires feature)\n\
   --alphamini-manifest FILE  Required versioned model manifest\n\
-  --opponent NAME            AlphaMini rung: random or minimax (default: minimax)\n\
+  --opponent NAME            Rung: random, minimax, or minigpt (default: minimax)\n\
   --opponent-model FILE      Exploratory AlphaMini-vs-AlphaMini opponent ONNX\n\
   --opponent-manifest FILE   Matching opponent model manifest\n\
   --alphamini-simulations N  Search cap per move (default: 10000)\n\
   --alphamini-time-ms N      Wall-clock cap per move (default: 9000)\n\
   --alphamini-batch-size N   Leaf inference batch (default: 8)\n\
+  --minigpt-model FILE       Play this MiniGPT ONNX model (requires feature)\n\
+  --minigpt-manifest FILE    Model manifest; defaults to manifest.json beside it\n\
+  --minigpt-temperature X    Override the manifest sampling temperature\n\
   --results FILE             Durable/resumable AlphaMini pair JSONL\n\
   --verdict FILE             Immutable AlphaMini gate verdict JSON\n\
   --require-lower-score X    Required bootstrap lower bound (default: 0.5)\n\
@@ -85,6 +89,9 @@ struct Args {
     alphamini_simulations: u32,
     alphamini_time_ms: u64,
     alphamini_batch_size: usize,
+    minigpt_model: Option<PathBuf>,
+    minigpt_manifest: Option<PathBuf>,
+    minigpt_temperature: Option<f32>,
     results: Option<PathBuf>,
     verdict: Option<PathBuf>,
     required_lower_score: f64,
@@ -108,6 +115,9 @@ impl Default for Args {
             alphamini_simulations: FROZEN_GATE_SIMULATIONS,
             alphamini_time_ms: FROZEN_GATE_TIME_MS,
             alphamini_batch_size: FROZEN_GATE_BATCH_SIZE,
+            minigpt_model: None,
+            minigpt_manifest: None,
+            minigpt_temperature: None,
             results: None,
             verdict: None,
             required_lower_score: FROZEN_GATE_REQUIRED_LOWER_SCORE,
@@ -138,12 +148,22 @@ fn run() -> Result<(), String> {
     if args.alphamini_model.is_some() {
         return run_alphamini_gate(&args, started);
     }
+    if args.minigpt_model.is_some() {
+        return run_minigpt_match(&args, started);
+    }
 
     if args.alphamini_manifest.is_some() {
         return Err("--alphamini-manifest requires --alphamini-model".to_string());
     }
+    if args.minigpt_manifest.is_some() || args.minigpt_temperature.is_some() {
+        return Err(
+            "--minigpt-manifest and --minigpt-temperature require --minigpt-model".to_string(),
+        );
+    }
     if args.opponent != "minimax" {
-        return Err("--opponent is only supported with --alphamini-model".to_string());
+        return Err(
+            "--opponent is only supported with --alphamini-model or --minigpt-model".to_string(),
+        );
     }
     if args.opponent_model.is_some() || args.opponent_manifest.is_some() {
         return Err("--opponent-model is only supported with --alphamini-model".to_string());
@@ -252,8 +272,13 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
     {
         return Err("AlphaMini search and bootstrap limits must be greater than zero".to_string());
     }
-    if args.opponent != "random" && args.opponent != "minimax" {
-        return Err("--opponent must be random or minimax".to_string());
+    if !matches!(args.opponent.as_str(), "random" | "minimax" | "minigpt") {
+        return Err("--opponent must be random, minimax, or minigpt".to_string());
+    }
+    if args.opponent == "minigpt" && !args.exploratory {
+        return Err(
+            "AlphaMini-vs-MiniGPT is exploratory and requires --exploratory true".to_string(),
+        );
     }
     if args.opponent_model.is_some() && !args.exploratory {
         return Err(
@@ -367,6 +392,7 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
         (None, None) => match args.opponent.as_str() {
             "random" => Box::new(PositionRandomEngine::seeded(args.seed)),
             "minimax" => Box::new(MinimaxEngine::new(SearchLimits::fixed_depth(args.depth)?)?),
+            "minigpt" => load_minigpt(args, args.seed ^ MINIGPT_OPPONENT_SEED_MIX)?,
             _ => unreachable!("opponent validated"),
         },
         _ => unreachable!("opponent model/manifest pairing validated"),
@@ -899,6 +925,147 @@ fn run_alphamini_gate(_args: &Args, _started: Instant) -> Result<(), String> {
     )
 }
 
+/// Keeps a MiniGPT opponent off the primary engine's RNG stream.
+#[cfg(feature = "alphamini")]
+const MINIGPT_OPPONENT_SEED_MIX: u64 = 0x6d69_6e69_6770_7401;
+
+#[cfg(feature = "minigpt")]
+fn load_minigpt(args: &Args, seed: u64) -> Result<Box<dyn Engine>, String> {
+    let model = args
+        .minigpt_model
+        .as_ref()
+        .ok_or("--minigpt-model is required to play MiniGPT")?;
+    let manifest = args
+        .minigpt_manifest
+        .clone()
+        .unwrap_or_else(|| model.with_file_name(minigpt::MODEL_MANIFEST_FILE));
+    Ok(Box::new(MiniGptEngine::load(
+        model,
+        manifest,
+        args.minigpt_temperature,
+        seed,
+    )?))
+}
+
+#[cfg(all(feature = "alphamini", not(feature = "minigpt")))]
+fn load_minigpt(_args: &Args, _seed: u64) -> Result<Box<dyn Engine>, String> {
+    Err(
+        "MiniGPT requires `cargo run -p arena --release --features minigpt --bin arena -- ...`"
+            .to_string(),
+    )
+}
+
+/// MiniGPT evaluation is exploratory: there is no frozen rung, verdict, or
+/// resumable pair log, so a suite simply selects paired openings over a plain
+/// alternating-color match.
+#[cfg(feature = "minigpt")]
+fn run_minigpt_match(args: &Args, started: Instant) -> Result<(), String> {
+    if args.opponent_model.is_some() || args.opponent_manifest.is_some() {
+        return Err("--opponent-model is only supported with --alphamini-model".to_string());
+    }
+    if args.results.is_some() || args.verdict.is_some() {
+        return Err("--results and --verdict are reserved for the AlphaMini gate".to_string());
+    }
+    if args.bootstrap_samples == 0 {
+        return Err("--bootstrap must be greater than zero".to_string());
+    }
+    let mut engine = load_minigpt(args, args.seed)?;
+    let mut opponent: Box<dyn Engine> = match args.opponent.as_str() {
+        "random" => Box::new(PositionRandomEngine::seeded(args.seed)),
+        "minimax" => Box::new(MinimaxEngine::new(SearchLimits::fixed_depth(args.depth)?)?),
+        other => {
+            return Err(format!(
+                "a MiniGPT match takes --opponent random or minimax, got {other:?}"
+            ));
+        }
+    };
+
+    if let Some(path) = &args.openings {
+        let openings = load_openings(path)?;
+        let pair_count = usize::try_from(args.games).map_err(|_| "--games is too large")?;
+        if pair_count == 0 || pair_count > openings.len() {
+            return Err(format!(
+                "--games must select between 1 and {} opening pairs",
+                openings.len()
+            ));
+        }
+        let openings = &openings[..pair_count];
+        println!(
+            "{} vs {}: {pair_count} paired openings, seed {}",
+            engine.name(),
+            opponent.name(),
+            args.seed
+        );
+        let paired = run_paired_match_with_progress(
+            &mut engine,
+            &mut opponent,
+            openings,
+            args.max_plies,
+            |completed, _, _| eprintln!("completed {completed}/{pair_count} opening pairs"),
+        )
+        .map_err(|error| error.to_string())?;
+        print_report(&paired.match_report, false);
+        let (low, high) = paired_score_bootstrap_95(
+            &paired,
+            BootstrapConfig {
+                samples: args.bootstrap_samples,
+                seed: args.seed,
+            },
+        )
+        .map_err(|error| error.to_string())?;
+        println!(
+            "Opening-pair bootstrap 95% score interval: {:.1}% to {:.1}% ({} samples)",
+            low * 100.0,
+            high * 100.0,
+            args.bootstrap_samples
+        );
+        println!(
+            "Opening-pair bootstrap 95% relative-Elo interval: {} to {}",
+            format_elo(elo_from_score(low)),
+            format_elo(elo_from_score(high))
+        );
+        println!("Elapsed: {:.1?}", started.elapsed());
+        return Ok(());
+    }
+
+    println!(
+        "{} vs {}: {} games, seed {}, max {} plies",
+        engine.name(),
+        opponent.name(),
+        args.games,
+        args.seed,
+        args.max_plies
+    );
+    let config = MatchConfig {
+        games: args.games,
+        max_plies: args.max_plies,
+    };
+    let report = run_match_with_progress(&mut engine, &mut opponent, config, |completed, _, _| {
+        eprintln!("completed {completed}/{} games", args.games);
+    })
+    .map_err(|error| error.to_string())?;
+    print_report(&report, true);
+    println!("Elapsed: {:.1?}", started.elapsed());
+    Ok(())
+}
+
+#[cfg(feature = "minigpt")]
+fn load_openings(path: &std::path::Path) -> Result<Vec<Opening>, String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let suite: OpeningSuite = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid opening suite {}: {error}", path.display()))?;
+    suite.validate().map_err(|error| error.to_string())
+}
+
+#[cfg(not(feature = "minigpt"))]
+fn run_minigpt_match(_args: &Args, _started: Instant) -> Result<(), String> {
+    Err(
+        "MiniGPT evaluation requires `cargo run -p arena --release --features minigpt --bin arena -- ...`"
+            .to_string(),
+    )
+}
+
 fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Option<Args>, String> {
     let mut parsed = Args::default();
     let mut args = args.into_iter();
@@ -924,6 +1091,11 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Option<Args>, St
             "--alphamini-simulations" => parsed.alphamini_simulations = parse_value(&arg, &value)?,
             "--alphamini-time-ms" => parsed.alphamini_time_ms = parse_value(&arg, &value)?,
             "--alphamini-batch-size" => parsed.alphamini_batch_size = parse_value(&arg, &value)?,
+            "--minigpt-model" => parsed.minigpt_model = Some(PathBuf::from(value)),
+            "--minigpt-manifest" => parsed.minigpt_manifest = Some(PathBuf::from(value)),
+            "--minigpt-temperature" => {
+                parsed.minigpt_temperature = Some(parse_value(&arg, &value)?)
+            }
             "--results" => parsed.results = Some(PathBuf::from(value)),
             "--verdict" => parsed.verdict = Some(PathBuf::from(value)),
             "--require-lower-score" => parsed.required_lower_score = parse_value(&arg, &value)?,
@@ -1161,6 +1333,30 @@ mod tests {
             (search.fpu_reduction * 1_000_000.0).round() as u32,
             FROZEN_GATE_FPU_REDUCTION_PPM
         );
+    }
+
+    #[test]
+    fn parses_minigpt_options() {
+        let args = parse_args(
+            [
+                "--minigpt-model",
+                "model.onnx",
+                "--minigpt-manifest",
+                "manifest.json",
+                "--minigpt-temperature",
+                "0.25",
+                "--opponent",
+                "minigpt",
+            ]
+            .into_iter()
+            .map(str::to_string),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(args.minigpt_model, Some(PathBuf::from("model.onnx")));
+        assert_eq!(args.minigpt_manifest, Some(PathBuf::from("manifest.json")));
+        assert_eq!(args.minigpt_temperature, Some(0.25));
+        assert_eq!(args.opponent, "minigpt");
     }
 
     #[test]

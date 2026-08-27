@@ -12,6 +12,10 @@ handle_path /projects/chessengines/api/alphamini/* {
 	reverse_proxy 127.0.0.1:3006
 }
 
+handle_path /projects/chessengines/api/minigpt/* {
+	reverse_proxy 127.0.0.1:3008
+}
+
 # Keep the original Random endpoint working for older clients.
 handle_path /projects/chessengines/api/* {
 	reverse_proxy 127.0.0.1:3002

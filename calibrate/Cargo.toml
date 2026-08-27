@@ -6,6 +6,7 @@ edition = "2024"
 [features]
 default = []
 alphamini = ["dep:alphamini", "arena/alphamini", "alphamini/onnx"]
+minigpt = ["arena/minigpt"]
 
 [dependencies]
 alphamini = { path = "../alphamini", optional = true, default-features = false }

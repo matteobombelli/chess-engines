@@ -6,11 +6,13 @@ edition = "2024"
 [features]
 default = []
 alphamini = ["dep:artifact-io", "alphamini/onnx"]
+minigpt = ["dep:minigpt", "minigpt/onnx"]
 
 [dependencies]
 alphamini = { path = "../alphamini", default-features = false }
 artifact-io = { path = "../artifact-io", optional = true }
 chess-core = { path = "../chess-core" }
+minigpt = { path = "../minigpt", optional = true, default-features = false }
 minimax = { path = "../minimax" }
 rand = "0.8"
 random = { path = "../random" }

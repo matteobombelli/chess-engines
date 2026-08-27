@@ -295,6 +295,16 @@ fn validate_experiment(experiment: &AnalysisExperimentV2) -> Result<(), String> 
             && root_dirichlet_alpha_ppm.is_none()
             && *root_noise_fraction_ppm == 0
             && evaluator == "onnxruntime-cpu-v1" => {}
+        AnalysisBotV2::MiniGpt {
+            model_sha256,
+            manifest_sha256,
+            context,
+            evaluator,
+            ..
+        } if valid_sha256(model_sha256)
+            && valid_sha256(manifest_sha256)
+            && *context >= 2
+            && evaluator == "onnxruntime-cpu-v1" => {}
         _ => return Err("format-v2 experiment contains an invalid bot config".to_string()),
     }
     let reference = &experiment.reference;
@@ -328,7 +338,22 @@ fn expected_bot_name(bot: &AnalysisBotV2) -> String {
             "AlphaMiniV1[{}] ({move_time_ms} ms/move, {simulations} simulation cap, batch {batch_size})",
             &model_sha256[..12]
         ),
+        AnalysisBotV2::MiniGpt {
+            model_sha256,
+            context,
+            temperature_ppm,
+            ..
+        } => minigpt_bot_name(&model_sha256[..12], *context, *temperature_ppm),
     }
+}
+
+/// The temperature is rendered from its exact millionths so the recorded name
+/// can be rebuilt from the experiment identity alone.
+pub fn minigpt_bot_name(model_identity: &str, context: usize, temperature_ppm: u32) -> String {
+    format!(
+        "MiniGptV1[{model_identity}] (temperature {:.6}, context {context})",
+        f64::from(temperature_ppm) / 1_000_000.0
+    )
 }
 
 fn validate_v2_row(

@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "alphamini")]
 use alphamini::{Evaluator, Mcts, SearchConfig, ValidatedModel};
+#[cfg(feature = "minigpt")]
+use minigpt::{GameEncoder, TokenEvaluator, truncate_context};
 
 /// A chess engine that can be compared in the arena.
 ///
@@ -246,6 +248,98 @@ impl Engine for AlphaMiniEngine {
         self.metrics.elapsed_micros += result.stats.elapsed_micros;
         self.metrics.deadlines_reached += u64::from(result.stats.deadline_reached);
         Ok(result.best_move)
+    }
+}
+
+/// Adapter for the stateless move-sequence GPT. It keeps no state between
+/// turns: the game's SAN history is re-encoded every move, so a board handed to
+/// it out of order is answered from that board's own history.
+#[cfg(feature = "minigpt")]
+pub struct MiniGptEngine {
+    evaluator: Box<dyn TokenEvaluator>,
+    context: usize,
+    temperature: f32,
+    rng: StdRng,
+    name: String,
+}
+
+#[cfg(feature = "minigpt")]
+impl MiniGptEngine {
+    /// `temperature` overrides the manifest's published sampling temperature.
+    pub fn load(
+        model_path: impl AsRef<std::path::Path>,
+        manifest_path: impl AsRef<std::path::Path>,
+        temperature: Option<f32>,
+        seed: u64,
+    ) -> Result<Self, String> {
+        let validated = minigpt::ValidatedModel::load(model_path, manifest_path)
+            .map_err(|error| error.to_string())?;
+        let identity = validated.manifest.model_sha256[..12].to_string();
+        let context = validated.manifest.context;
+        let temperature = temperature.unwrap_or(validated.manifest.decode_temperature);
+        let evaluator = minigpt::evaluator::OnnxEvaluator::load(&validated)
+            .map_err(|error| error.to_string())?;
+        Self::with_evaluator(Box::new(evaluator), context, temperature, seed, identity)
+    }
+
+    pub fn with_evaluator(
+        evaluator: Box<dyn TokenEvaluator>,
+        context: usize,
+        temperature: f32,
+        seed: u64,
+        identity: impl Into<String>,
+    ) -> Result<Self, String> {
+        // BOS plus one move must fit, or nothing can ever be decoded.
+        if context < 2 {
+            return Err(format!(
+                "MiniGPT context must hold BOS plus a move, got {context}"
+            ));
+        }
+        if !temperature.is_finite() || temperature < 0.0 {
+            return Err(format!(
+                "MiniGPT temperature must be finite and non-negative, got {temperature}"
+            ));
+        }
+        let identity = identity.into();
+        if identity.trim().is_empty() {
+            return Err("MiniGPT identity must not be empty".to_string());
+        }
+        Ok(Self {
+            evaluator,
+            context,
+            temperature,
+            rng: StdRng::seed_from_u64(seed),
+            name: format!("MiniGptV1[{identity}]"),
+        })
+    }
+
+    pub fn context(&self) -> usize {
+        self.context
+    }
+
+    pub fn temperature(&self) -> f32 {
+        self.temperature
+    }
+}
+
+#[cfg(feature = "minigpt")]
+impl Engine for MiniGptEngine {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn choose_move(&mut self, board: &Board) -> Result<Move, String> {
+        let mut encoder = GameEncoder::new();
+        for san in &board.san_history {
+            encoder.push_san(san).map_err(|error| error.to_string())?;
+        }
+        let tokens = truncate_context(encoder.tokens(), self.context);
+        let logits = self
+            .evaluator
+            .logits(&tokens)
+            .map_err(|error| error.to_string())?;
+        minigpt::choose_move(logits.last_row(), board, self.temperature, &mut self.rng)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -1177,5 +1271,66 @@ mod tests {
     #[test]
     fn frozen_minimax_ladder_matches_move_digest() {
         assert_eq!(minimax_v1_move_digest().unwrap(), MINIMAX_V1_MOVE_DIGEST);
+    }
+
+    #[cfg(feature = "minigpt")]
+    fn minigpt_engine(seed: u64) -> MiniGptEngine {
+        MiniGptEngine::with_evaluator(
+            Box::new(minigpt::UniformEvaluator),
+            256,
+            0.5,
+            seed,
+            "fixture",
+        )
+        .unwrap()
+    }
+
+    #[cfg(feature = "minigpt")]
+    #[test]
+    fn minigpt_plays_legal_moves_from_committed_openings() {
+        let suite: OpeningSuite =
+            serde_json::from_str(include_str!("../openings/alphamini-v1.json")).unwrap();
+        let mut engine = minigpt_engine(1);
+        for entry in suite.openings.iter().take(8) {
+            let mut board = Board::import_san(&entry.san).unwrap();
+            for _ in 0..12 {
+                if board.status() != Status::Ongoing {
+                    break;
+                }
+                let chosen = engine.choose_move(&board).unwrap();
+                assert!(
+                    board.get_legal_moves().contains(&chosen),
+                    "opening {} produced {chosen:?}",
+                    entry.id
+                );
+                board.make_move(chosen);
+            }
+        }
+    }
+
+    #[cfg(feature = "minigpt")]
+    #[test]
+    fn minigpt_is_reproducible_from_its_seed() {
+        let play = |seed| {
+            let mut engine = minigpt_engine(seed);
+            let mut board = Board::import_san("1. e4 e5 2. Nf3 Nc6").unwrap();
+            let mut opponent = PositionRandomEngine::seeded(9);
+            let mut played = Vec::new();
+            for ply in 0..24 {
+                if board.status() != Status::Ongoing {
+                    break;
+                }
+                let chosen = if ply % 2 == 0 {
+                    engine.choose_move(&board).unwrap()
+                } else {
+                    opponent.choose_move(&board).unwrap()
+                };
+                board.make_move(chosen);
+                played.push(chosen);
+            }
+            played
+        };
+        assert_eq!(play(7), play(7));
+        assert_ne!(play(7), play(8));
     }
 }
