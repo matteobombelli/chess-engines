@@ -1,5 +1,9 @@
 # Minimax at 9 seconds per move
 
+> **Superseded for display.** The site now shows full-game ratings from the
+> Stockfish limited-strength ladder in `docs/ratings/full-game-elo.md`. The
+> move-quality estimate below remains valid for what it measures.
+
 ## Result
 
 The production Minimax configuration is best labeled **about 2050 Chess.com

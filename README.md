@@ -61,11 +61,18 @@ every prefix twice with colors reversed. AlphaMini evaluation additionally
 bootstraps whole opening pairs, writes a resumable JSONL record, and freezes the
 model, opponent, search, suite, and binary identities.
 
-For a platform-calibrated estimate instead, the `calibrate` crate compares bot
-move quality with rated humans in public Chess.com games at exactly 30+0. See
-[`calibrate/README.md`](calibrate/README.md) for corpus collection, Stockfish
-analysis, statistical fitting, and the limits of that estimate. Chess.com calls
-30+0 Rapid, even though it is the slow/classical-style target used here.
+The ratings shown on the site come from full games against Stockfish 17.1 held
+at fixed limited-strength levels, fitted by maximum likelihood with a bootstrap
+95% interval. The method, results, and their limits are in
+[docs/ratings/full-game-elo.md](docs/ratings/full-game-elo.md). Time-budgeted
+bots were measured through the production API so the numbers describe the
+deployed hardware.
+
+The `calibrate` crate is the older, superseded method: it compares bot move
+quality with rated humans in public Chess.com games at exactly 30+0. See
+[`calibrate/README.md`](calibrate/README.md) for what it measures and its
+limits. Its estimates remain valid for single-move quality, and the gap between
+the two methods for MiniGPT is discussed in the full-game document.
 
 ## Minimax
 
@@ -87,33 +94,36 @@ lineage, at inference batch 256, with the resulting model served in production.
 Its lineage, incidents, and evaluation are in the
 [run 003 result](docs/alphamini/results/run-003.md).
 
-AlphaMini calibrates to about **1970 Chess.com 30+0 move-quality Elo**, with a
-95% whole-player bootstrap interval from 1758 to at or above 1999. The frozen
-Depth-3 baseline calibrates to about 1640 with a wide interval from at or below
-1400 to 1780; see its [calibration report](calibrate/DEPTH_THREE_RESULTS.md).
-Both are historical-position move-quality estimates, not full-game ratings.
+In full games against Stockfish at fixed strength levels, Depth-3 rates 1698
+(95% CI 1627 to 1766), the deployed 9-second search rates 2057 (95% CI 1961 to
+2142), and AlphaMini rates 2289 (95% CI 2229 to 2353), the two time-budgeted
+bots measured through the production API. The older move-quality calibration
+put AlphaMini near 1970; full games rate it higher. All current numbers live in
+[docs/ratings/full-game-elo.md](docs/ratings/full-game-elo.md).
 
 ## MiniGPT
 
-`minigpt` is a 40M-parameter decoder-only GPT that plays chess by predicting
-the next move rather than by searching. It is trained on 11.2 million strong
-Lichess games — both players at least 2000, Blitz/Rapid/Classical, cleanly
-terminated — tokenized as `BOS` plus one move token per ply over the same
-`policy-v1` action space AlphaMini uses.
+`minigpt` is a 40.3M-parameter decoder-only GPT that plays chess by predicting
+the next move, with no search. It is trained on 11.2 million strong Lichess
+games (both players at least 2000, Blitz/Rapid/Classical, cleanly terminated),
+tokenized as `BOS` plus one move token per ply over the same `policy-v1` action
+space AlphaMini uses.
 
 Rust owns rules, SAN replay, corpus ingest, token shards, CPU ONNX serving, and
 decoding. Python owns the transformer, optimization, crash-safe checkpoints,
-ONNX export, and the run ledger. It has no search: the model produces one
-distribution per position and a **legality mask** decides what that
-distribution may mean, so — like every other engine here — it can only ever
-play a move `chess-core` already generated.
+ONNX export, and the run ledger. The model produces one distribution per
+position and a **legality mask** filters it, so like every other engine here it
+can only ever play a move `chess-core` already generated.
 
 Start with the [current status and continuation handoff](docs/minigpt/status.md),
 then read the [design](docs/minigpt/design.md) and follow the
 [training runbook](docs/minigpt/training-runbook.md). The dated engineering
 record, including the corpus measurements and the pilot, is in the
-[implementation log](docs/minigpt/implementation-log.md). The v1 run is in
-progress; it is not yet evaluated, calibrated, or deployed.
+[implementation log](docs/minigpt/implementation-log.md). The v1 run is
+complete and the model is deployed; its training result is in the
+[run 001 result](docs/minigpt/results/run-001.md) and its full-game rating of
+1395 (95% CI 1322 to 1455) is in
+[docs/ratings/full-game-elo.md](docs/ratings/full-game-elo.md).
 
 ## Deploy
 

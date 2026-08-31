@@ -5,8 +5,13 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use serde::{Deserialize, Serialize};
 
+mod explainers;
 mod minigpt_training;
 mod training;
+use explainers::{
+    AlphaMiniHowItWorks, MiniGptHowItWorks, MinimaxHowItWorks, RandomHowItWorks,
+    TimedMinimaxHowItWorks,
+};
 use minigpt_training::MiniGptTrainingProgress;
 use training::TrainingProgress;
 
@@ -55,10 +60,10 @@ impl Model {
     fn elo_label(self) -> &'static str {
         match self {
             Self::Random => "<400 Elo",
-            Self::MinimaxDepth3 => "≈1640 Elo",
-            Self::MinimaxNineSeconds => "≈2050 Elo",
-            Self::AlphaMini => "≈1970 Elo",
-            Self::MiniGpt => "≈1930 Elo",
+            Self::MinimaxDepth3 => "≈1700 Elo",
+            Self::MinimaxNineSeconds => "≈2060 Elo",
+            Self::AlphaMini => "≈2290 Elo",
+            Self::MiniGpt => "≈1400 Elo",
         }
     }
 
@@ -470,9 +475,11 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"Random"</h2>
                             </div>
                             <p class="about-intro">
-                                "Random knows the rules of chess, but it has no strategy. It chooses from all legal moves with equal odds."
+                                "Random knows the rules of chess and nothing else. It picks one of the legal moves with equal odds. I wrote it first, as the floor the other four engines are measured against."
                             </p>
                         </div>
+
+                        <RandomHowItWorks/>
 
                         <div class="about-details">
                             <article>
@@ -484,13 +491,13 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rules"</h3>
                                 <p>
-                                    "The shared rules engine handles castling, en passant, promotion, check, checkmate, and draws. It leaves out any move that would expose its king."
+                                    "All five bots share one rules engine written in Rust. It handles castling, en passant, promotion, check, checkmate, and draws, and it never offers a move that would leave its own king in check."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality fell below 400 Chess.com Elo. The 95% player-bootstrap CI is also below 400, with both endpoints censored by the calibration floor."
+                                    "Random went winless in 220 full rating games against Stockfish, Depth-3, and MiniGPT. Its only half points were seven stalemates MiniGPT stumbled into from winning positions. Every measurement is consistent with a rating below 400."
                                 </p>
                             </article>
                         </div>
@@ -504,15 +511,17 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"Depth-3 Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "Depth-3 Minimax looks three moves ahead and chooses the line with the best score. Since the search always stops at the same depth, it usually replies quickly."
+                                "Depth-3 Minimax looks three moves ahead and plays the line with the best score. The depth is fixed, so its reply time barely changes from one move to the next. This is the first engine here that plans at all."
                             </p>
                         </div>
+
+                        <MinimaxHowItWorks/>
 
                         <div class="about-details">
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "It assumes both sides choose their strongest move. If the third move leads to more captures or leaves a king in check, the engine follows those replies before it scores the position."
+                                    "The search assumes both sides play their strongest move. If the third move leads to captures or leaves a king in check, it follows those replies further before scoring the position."
                                 </p>
                             </article>
                             <article>
@@ -524,7 +533,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 1640 Chess.com Elo. The 95% whole-player bootstrap interval is at or below 1400 to 1780; its lower endpoint is censored by the calibrated range. It did not play full games on Chess.com."
+                                    "Rated by full games against Stockfish 17.1 held at fixed strength levels. Over 80 games it fit a rating of 1698, with a 95% confidence interval of 1627 to 1766. The scale is Stockfish's human-anchored Elo, which is close to a Chess.com rating. Engines cannot play rated games on Chess.com, so every rating here is an estimate on that scale."
                                 </p>
                             </article>
                         </div>
@@ -538,15 +547,17 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"9-second Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "The timed engine searches for up to nine seconds before each move. It starts shallow and keeps searching deeper until time runs out."
+                                "This engine gets nine seconds per move. It starts with a shallow search and keeps going deeper until the time is gone. It uses the same code and the same evaluation as Depth-3. The only difference is what stops the search."
                             </p>
                         </div>
+
+                        <TimedMinimaxHowItWorks/>
 
                         <div class="about-details">
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "It saves the best move after every finished search, so the next, deeper search can use all the time left. Move ordering and alpha-beta pruning skip lines that cannot change its choice."
+                                    "It saves the best move after every depth it finishes, so it always has an answer ready when the clock runs out. Move ordering and alpha-beta pruning skip lines that cannot change its choice, which is what buys the extra depth."
                                 </p>
                             </article>
                             <article>
@@ -558,7 +569,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 2050 Chess.com Elo. The 95% player-bootstrap CI starts at 1889. Its upper endpoint is at or above 2199, the highest well-populated rating group."
+                                    "Rated by full games played through the live site, so the number reflects the server it really runs on. Over 60 games against Stockfish 17.1 at fixed strength levels it fit a rating of 2057, with a 95% confidence interval of 1961 to 2142 on the same approximate Chess.com scale as the other engines."
                                 </p>
                             </article>
                         </div>
@@ -572,27 +583,29 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"AlphaMini"</h2>
                             </div>
                             <p class="about-intro">
-                                "AlphaMini learns only from self-play. A compact convolutional network predicts promising moves and the likely result, while Monte Carlo tree search tests those predictions against the legal replies."
+                                "AlphaMini learns from self-play alone. It has never seen a human game. A small convolutional network guesses which moves are worth looking at and how the game will end, and Monte Carlo tree search checks those guesses against the legal replies. I trained it for 72 hours on one RTX 3070."
                             </p>
                         </div>
+
+                        <AlphaMiniHowItWorks/>
 
                         <div class="about-details">
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "Rust generates every legal move and searches a tree for up to nine seconds. The neural network ranks positions; it never invents or directly applies a move."
+                                    "Rust generates every legal move and searches the tree for up to nine seconds. The network only scores positions and ranks the moves it is given. It never produces a move of its own."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Training"</h3>
                                 <p>
-                                    "The deployed network trained for 72 hours of seeded, versioned self-play on one RTX 3070. Checkpoints, data shards, software versions, and interrupted-run recovery state are recorded so training can be audited and continued."
+                                    "The deployed network trained for 72 active hours across three chained runs of self-play. Every cycle is seeded, and its checkpoint is recorded with the exact code and data behind it, so an interrupted run resumes where it stopped and any cycle can be checked later."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "On historical 30+0 positions, its move quality was closest to players rated around 1970 Chess.com Elo. The 95% player-bootstrap CI starts at 1758; its upper endpoint is at or above 1999. An independent sample of players rated 1700 and up agreed, crossing in the same band. It did not play full games on Chess.com."
+                                    "Rated by full games played through the live site, so the number reflects the production server. Over 160 games against Stockfish 17.1 at fixed strength levels it fit a rating of 2289, with a 95% confidence interval of 2229 to 2353. The older single-move estimate was 1970. Full games moved it up because a searching engine reliably converts the small advantages its judgment finds."
                                 </p>
                             </article>
                         </div>
@@ -608,27 +621,29 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"MiniGPT"</h2>
                             </div>
                             <p class="about-intro">
-                                "MiniGPT is a 40-million-parameter GPT that predicts the next move from the whole game, trained on 11 million strong Lichess games. It does not search: it reads the moves played so far and answers with the move it expects to come next."
+                                "MiniGPT has 40.3 million parameters and does no search at all. I trained it on 11.2 million Lichess games where both players were rated at least 2000. It reads the moves played so far and answers with the move it expects to come next."
                             </p>
                         </div>
+
+                        <MiniGptHowItWorks/>
 
                         <div class="about-details">
                             <article>
                                 <h3>"Prediction"</h3>
                                 <p>
-                                    "Every game is a sequence of move tokens. A decoder-only transformer reads that sequence and scores each possible next move in one forward pass, so a reply takes milliseconds rather than seconds."
+                                    "Every game is a sequence of move tokens. A decoder-only transformer reads the sequence and scores every possible next move in one forward pass. A reply takes milliseconds."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rules"</h3>
                                 <p>
-                                    "Rust still generates the legal moves and keeps every illegal option out of the choice. The model only ranks moves the rules already allow; it never invents or applies one itself."
+                                    "Rust generates the legal moves and masks out everything else before the model's scores are read. The model only ranks moves the rules already allow."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Calibrated at about 1930 on the Chess.com 30+0 move-quality scale, using the same Stockfish reference method as the other engines — within the confidence interval of AlphaMini, from a single millisecond forward pass instead of a nine-second search."
+                                    "Rated by full games against Stockfish 17.1 at fixed strength levels: 1395, with a 95% confidence interval of 1322 to 1455 over 160 games. Single-move tests once scored it near 1930, and the gap is the finding. Its moves look strong one at a time, but with no search it walks into tactics across a whole game."
                                 </p>
                             </article>
                         </div>
@@ -919,10 +934,10 @@ mod tests {
     #[test]
     fn model_labels_include_elo() {
         assert_eq!(Model::Random.elo_label(), "<400 Elo");
-        assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1640 Elo");
-        assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2050 Elo");
-        assert_eq!(Model::AlphaMini.elo_label(), "≈1970 Elo");
-        assert_eq!(Model::MiniGpt.elo_label(), "≈1930 Elo");
+        assert_eq!(Model::MinimaxDepth3.elo_label(), "≈1700 Elo");
+        assert_eq!(Model::MinimaxNineSeconds.elo_label(), "≈2060 Elo");
+        assert_eq!(Model::AlphaMini.elo_label(), "≈2290 Elo");
+        assert_eq!(Model::MiniGpt.elo_label(), "≈1400 Elo");
         assert_eq!(
             Model::AlphaMini.url(),
             "/projects/chessengines/api/alphamini/move"
@@ -931,7 +946,7 @@ mod tests {
 
     #[test]
     fn minigpt_is_offered_with_its_calibrated_rating() {
-        assert_eq!(Model::MiniGpt.elo_label(), "≈1930 Elo");
+        assert_eq!(Model::MiniGpt.elo_label(), "≈1400 Elo");
         assert_eq!(
             Model::MiniGpt.url(),
             "/projects/chessengines/api/minigpt/move"

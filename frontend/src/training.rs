@@ -22,7 +22,7 @@ pub fn TrainingProgress() -> impl IntoView {
                 <h3>"Training progress"</h3>
                 <div class="training-intro">
                     <p>
-                        "The deployed network is the product of 391 self-play cycles across three chained runs. Each cycle plays a batch of games against itself, then updates the network on the positions those games produced."
+                        "The deployed network came out of 391 self-play cycles across three chained runs. Each cycle plays a batch of games against itself, then updates the network on the positions those games produced."
                     </p>
                     <p>
                         "Loss measures how far the network's predictions are from what the search chose and how the games actually ended. Lower is better."
@@ -35,7 +35,7 @@ pub fn TrainingProgress() -> impl IntoView {
                     <dt>"Training cycles"</dt>
                     <dd class="stat-value">"391"</dd>
                     <dd class="stat-note">
-                        "One cycle is roughly eleven minutes: 1,024 self-play games, then about 600 weight updates on the fresh positions."
+                        "One cycle takes about eleven minutes. It plays 1,024 self-play games, then runs about 600 weight updates on the positions they produced."
                     </dd>
                 </div>
                 <div>
@@ -47,14 +47,14 @@ pub fn TrainingProgress() -> impl IntoView {
                 </div>
                 <div>
                     <dt>"Train loss"</dt>
-                    <dd class="stat-value">"5.94 → 2.86"</dd>
+                    <dd class="stat-value">"5.94 to 2.86"</dd>
                     <dd class="stat-note">
-                        "The combined move and result loss on each cycle's own games fell 52% from the first cycle to the last."
+                        "The combined move and result loss on each cycle's own games. It fell 52% from the first cycle to the last."
                     </dd>
                 </div>
                 <div>
                     <dt>"Validation loss"</dt>
-                    <dd class="stat-value">"4.50 → 3.07"</dd>
+                    <dd class="stat-value">"4.50 to 3.07"</dd>
                     <dd class="stat-note">
                         "The same loss on held-out positions the optimizer never trains on. Its best value, 2.85, came at cycle 289 of 339 in the final run."
                     </dd>
@@ -120,7 +120,7 @@ pub fn TrainingProgress() -> impl IntoView {
                     </figcaption>
                 </figure>
                 <figure class="chart">
-                    <svg viewBox="0 0 350 220" role="img" aria-label="Win, draw, loss prediction loss per cycle. Train falls from 0.88 to 0.51; validation is noisier and falls from 0.92 to 0.71.">
+                    <svg viewBox="0 0 350 220" role="img" aria-label="Win, draw, loss prediction loss per cycle. Train falls from 0.88 to 0.51. Validation is noisier and falls from 0.92 to 0.71.">
                         <line class="grid" x1="38" x2="336" y1="157.6" y2="157.6"></line>
                         <line class="grid" x1="38" x2="336" y1="84.8" y2="84.8"></line>
                         <line class="grid" x1="38" x2="336" y1="12" y2="12"></line>
@@ -137,7 +137,7 @@ pub fn TrainingProgress() -> impl IntoView {
                     </svg>
                     <figcaption>
                         <strong>"Result prediction."</strong>
-                        " How well the network predicts whether a game ends in a win, a draw, or a loss. This is where the network does worst: the gap between the curves shows it predicts results much less accurately on held-out games than on its own training batch."
+                        " How well the network predicts whether a game ends in a win, a draw, or a loss. This is the network's weakest head. The gap between the two curves is wide, so it predicts results much less accurately on held-out games than on its own training batch."
                     </figcaption>
                 </figure>
             </div>

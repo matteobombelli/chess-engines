@@ -728,6 +728,41 @@ h2 {
 
 .chart-duo .chart { margin-top: 0; }
 
+.how-it-works {
+    margin-top: 42px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line-strong);
+}
+
+.how-it-works h3 {
+    margin: 0;
+    font-family: var(--font-serif);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.how-it-works .chart { margin-top: 22px; }
+
+.diagram .box { fill: var(--paper-raised); stroke: var(--line-strong); stroke-width: 1; }
+.diagram .box.accent { stroke: var(--chart-train); stroke-width: 2; }
+.diagram .cell { fill: var(--line); }
+.diagram .piece { fill: var(--paper-raised); stroke: var(--ink-soft); stroke-width: 1; }
+.diagram .piece.dark { fill: var(--ink-soft); }
+.diagram .edge { fill: none; stroke: var(--ink-muted); stroke-width: 1.5; }
+.diagram .edge.accent { stroke: var(--chart-train); stroke-width: 2.5; }
+.diagram .head { fill: var(--ink-muted); }
+.diagram .fill { fill: var(--chart-train); }
+
+.diagram .label {
+    fill: var(--ink);
+    font-size: 13px;
+    font-family: var(--font-sans);
+}
+
+.diagram .label.accent { fill: var(--chart-train); font-weight: 600; }
+.diagram .warm { fill: var(--chart-val); }
+.diagram .muted { opacity: .32; }
+
 @media (max-width: 820px) {
     .app-shell { width: min(640px, calc(100% - 24px)); padding-top: 28px; }
     header { grid-template-columns: 1fr auto; gap: 20px; }

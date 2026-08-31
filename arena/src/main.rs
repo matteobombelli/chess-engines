@@ -1,9 +1,5 @@
 use std::env;
 use std::fs;
-#[cfg(feature = "alphamini")]
-use std::fs::{File, OpenOptions};
-#[cfg(feature = "alphamini")]
-use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::Instant;
@@ -24,6 +20,12 @@ use alphamini::{
 #[cfg(feature = "alphamini")]
 use arena::MINIMAX_V1_MOVE_DIGEST;
 #[cfg(feature = "alphamini")]
+use arena::paired_report_from_results;
+#[cfg(feature = "alphamini")]
+use arena::rating_log::{
+    PAIRED_LOG_HEADER_SCHEMA, PairedLogHeader, StoredPair, append_pair_log, load_or_create_pair_log,
+};
+#[cfg(feature = "alphamini")]
 use arena::{AlphaMiniEngine, AlphaMiniMetrics};
 use arena::{
     BootstrapConfig, MatchConfig, MatchReport, MinimaxEngine, OpeningSuite, RandomEngine, Record,
@@ -32,17 +34,11 @@ use arena::{
 };
 #[cfg(any(feature = "alphamini", feature = "minigpt"))]
 use arena::{Engine, PositionRandomEngine};
-#[cfg(feature = "alphamini")]
-use arena::{GameResult, OpeningPairResult, Termination, paired_report_from_results};
 #[cfg(feature = "minigpt")]
 use arena::{MiniGptEngine, Opening};
 #[cfg(feature = "alphamini")]
 use artifact_io::{publish_bytes_new, sha256_bytes, sha256_file};
-#[cfg(feature = "alphamini")]
-use chess_core::Color;
 use minimax::SearchLimits;
-#[cfg(feature = "alphamini")]
-use serde::{Deserialize, Serialize};
 
 const HELP: &str = "\
 Run a reproducible Random/Minimax match or an AlphaMini release-gate match.\n\
@@ -397,33 +393,38 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
         },
         _ => unreachable!("opponent model/manifest pairing validated"),
     };
+    let evaluation_binary_sha256 = sha256_file(
+        &std::env::current_exe()
+            .map_err(|error| format!("cannot resolve evaluation binary: {error}"))?,
+    )
+    .map_err(|error| format!("could not hash evaluation binary: {error}"))?;
     let header = PairedLogHeader {
         schema: PAIRED_LOG_HEADER_SCHEMA.to_string(),
         engine_a: alpha.name().to_string(),
         engine_b: opponent.name().to_string(),
-        model_sha256,
+        model_sha256: Some(model_sha256.clone()),
         opponent_model_sha256,
-        opening_suite_sha256: suite_sha256,
+        opening_suite_sha256: Some(suite_sha256.clone()),
         opening_ids: openings.iter().map(|opening| opening.id.clone()).collect(),
-        depth: args.depth,
+        depth: Some(args.depth),
         seed: args.seed,
         max_plies: args.max_plies,
-        simulations: args.alphamini_simulations,
-        time_ms: args.alphamini_time_ms,
-        batch_size: args.alphamini_batch_size,
-        cpuct_ppm: FROZEN_GATE_CPUCT_PPM,
-        fpu_reduction_ppm: FROZEN_GATE_FPU_REDUCTION_PPM,
+        simulations: Some(args.alphamini_simulations),
+        time_ms: Some(args.alphamini_time_ms),
+        batch_size: Some(args.alphamini_batch_size),
+        cpuct_ppm: Some(FROZEN_GATE_CPUCT_PPM),
+        fpu_reduction_ppm: Some(FROZEN_GATE_FPU_REDUCTION_PPM),
         bootstrap_samples: args.bootstrap_samples,
-        required_lower_score_ppm: score_to_ppm(args.required_lower_score),
+        required_lower_score_ppm: Some(score_to_ppm(args.required_lower_score)),
         minimax_v1_move_digest: MINIMAX_V1_MOVE_DIGEST,
-        evaluation_binary_sha256: sha256_file(
-            &std::env::current_exe()
-                .map_err(|error| format!("cannot resolve evaluation binary: {error}"))?,
-        )
-        .map_err(|error| format!("could not hash evaluation binary: {error}"))?,
+        evaluation_binary_sha256: Some(evaluation_binary_sha256.clone()),
         target: format!("{}-{}", std::env::consts::ARCH, std::env::consts::OS),
-        inference_device: "onnx-cpu".to_string(),
+        inference_device: Some("onnx-cpu".to_string()),
         exploratory: args.exploratory,
+        stockfish_version: None,
+        uci_elo: None,
+        movetime_ms: None,
+        bot_url: None,
     };
     println!(
         "AlphaMini vs {}: {} paired openings, {} ms / {} simulations",
@@ -432,10 +433,14 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
         args.alphamini_time_ms,
         args.alphamini_simulations
     );
-    let (mut pairs, mut metrics) = match &args.results {
-        Some(path) => load_or_create_pair_log(path, &header)?,
-        None => (Vec::new(), AlphaMiniMetrics::default()),
-    };
+    let mut pairs = Vec::new();
+    let mut metrics = AlphaMiniMetrics::default();
+    if let Some(path) = &args.results {
+        for (pair, recorded) in load_or_create_pair_log(path, &header)? {
+            metrics = metrics_sum(metrics, recorded.unwrap_or_default());
+            pairs.push(pair);
+        }
+    }
     if !pairs.is_empty() {
         eprintln!(
             "resuming after {}/{} durably recorded opening pairs",
@@ -459,7 +464,7 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
             .expect("one opening produces one pair");
         let delta = alpha.take_metrics();
         if let Some(path) = &args.results {
-            append_pair_log(path, &StoredPair::from_pair(&pair, delta))?;
+            append_pair_log(path, &StoredPair::from_pair(&pair, Some(delta)))?;
         }
         metrics = metrics_sum(metrics, delta);
         pairs.push(pair);
@@ -514,16 +519,16 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
         let verdict = GateVerdictV1 {
             schema: alphamini::manifest::GATE_VERDICT_VERSION.to_string(),
             passed,
-            model_sha256: header.model_sha256.clone(),
-            opening_suite_sha256: header.opening_suite_sha256.clone(),
+            model_sha256,
+            opening_suite_sha256: suite_sha256,
             opening_pairs: paired.pairs.len(),
             baseline: header.engine_b.clone(),
             minimax_v1_move_digest: header.minimax_v1_move_digest,
-            simulations: header.simulations,
-            time_ms: header.time_ms,
-            batch_size: header.batch_size,
-            cpuct_ppm: header.cpuct_ppm,
-            fpu_reduction_ppm: header.fpu_reduction_ppm,
+            simulations: args.alphamini_simulations,
+            time_ms: args.alphamini_time_ms,
+            batch_size: args.alphamini_batch_size,
+            cpuct_ppm: FROZEN_GATE_CPUCT_PPM,
+            fpu_reduction_ppm: FROZEN_GATE_FPU_REDUCTION_PPM,
             max_plies: header.max_plies,
             bootstrap_samples: args.bootstrap_samples,
             bootstrap_seed: args.seed,
@@ -533,7 +538,7 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
             required_lower_score: args.required_lower_score,
             pair_log_sha256: sha256_file(pair_log)
                 .map_err(|error| format!("could not hash {}: {error}", pair_log.display()))?,
-            evaluation_binary_sha256: header.evaluation_binary_sha256.clone(),
+            evaluation_binary_sha256,
             created_unix_seconds: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_err(|error| format!("system clock is before Unix epoch: {error}"))?
@@ -554,291 +559,6 @@ fn run_alphamini_gate(args: &Args, started: Instant) -> Result<(), String> {
     } else {
         Ok(())
     }
-}
-
-#[cfg(feature = "alphamini")]
-const PAIRED_LOG_HEADER_SCHEMA: &str = "alphamini-paired-evaluation-v1";
-#[cfg(feature = "alphamini")]
-const PAIRED_LOG_PAIR_SCHEMA: &str = "alphamini-paired-opening-result-v1";
-#[cfg(feature = "alphamini")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct PairedLogHeader {
-    schema: String,
-    engine_a: String,
-    engine_b: String,
-    model_sha256: String,
-    opponent_model_sha256: Option<String>,
-    opening_suite_sha256: String,
-    opening_ids: Vec<String>,
-    depth: u8,
-    seed: u64,
-    max_plies: u32,
-    simulations: u32,
-    time_ms: u64,
-    batch_size: usize,
-    cpuct_ppm: u32,
-    fpu_reduction_ppm: u32,
-    bootstrap_samples: u32,
-    required_lower_score_ppm: u32,
-    minimax_v1_move_digest: u64,
-    evaluation_binary_sha256: String,
-    target: String,
-    inference_device: String,
-    exploratory: bool,
-}
-
-#[cfg(feature = "alphamini")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredGame {
-    winner: Option<String>,
-    termination: String,
-    plies: u32,
-}
-
-#[cfg(feature = "alphamini")]
-impl StoredGame {
-    fn from_game(game: &GameResult) -> Self {
-        Self {
-            winner: game.winner.map(|color| match color {
-                Color::White => "white".to_string(),
-                Color::Black => "black".to_string(),
-            }),
-            termination: match game.termination {
-                Termination::Checkmate => "checkmate",
-                Termination::Stalemate => "stalemate",
-                Termination::InsufficientMaterial => "insufficient_material",
-                Termination::ThreefoldRepetition => "threefold_repetition",
-                Termination::FiftyMoveRule => "fifty_move_rule",
-                Termination::PlyLimit => "ply_limit",
-            }
-            .to_string(),
-            plies: game.plies,
-        }
-    }
-
-    fn into_game(self) -> Result<GameResult, String> {
-        let winner = match self.winner.as_deref() {
-            None => None,
-            Some("white") => Some(Color::White),
-            Some("black") => Some(Color::Black),
-            Some(value) => return Err(format!("invalid stored winner {value:?}")),
-        };
-        let termination = match self.termination.as_str() {
-            "checkmate" => Termination::Checkmate,
-            "stalemate" => Termination::Stalemate,
-            "insufficient_material" => Termination::InsufficientMaterial,
-            "threefold_repetition" => Termination::ThreefoldRepetition,
-            "fifty_move_rule" => Termination::FiftyMoveRule,
-            "ply_limit" => Termination::PlyLimit,
-            value => return Err(format!("invalid stored termination {value:?}")),
-        };
-        if (winner.is_some()) != (termination == Termination::Checkmate) {
-            return Err("stored winner must be present exactly for checkmate".to_string());
-        }
-        Ok(GameResult {
-            winner,
-            termination,
-            plies: self.plies,
-        })
-    }
-}
-
-#[cfg(feature = "alphamini")]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct StoredPair {
-    schema: String,
-    opening_id: String,
-    engine_a_as_white: StoredGame,
-    engine_a_as_black: StoredGame,
-    metrics: AlphaMiniMetrics,
-}
-
-#[cfg(feature = "alphamini")]
-impl StoredPair {
-    fn from_pair(pair: &OpeningPairResult, metrics: AlphaMiniMetrics) -> Self {
-        Self {
-            schema: PAIRED_LOG_PAIR_SCHEMA.to_string(),
-            opening_id: pair.opening_id.clone(),
-            engine_a_as_white: StoredGame::from_game(&pair.engine_a_as_white),
-            engine_a_as_black: StoredGame::from_game(&pair.engine_a_as_black),
-            metrics,
-        }
-    }
-
-    fn into_pair(self) -> Result<(OpeningPairResult, AlphaMiniMetrics), String> {
-        if self.schema != PAIRED_LOG_PAIR_SCHEMA {
-            return Err(format!("unsupported pair log schema {:?}", self.schema));
-        }
-        let as_white = self.engine_a_as_white.into_game()?;
-        let as_black = self.engine_a_as_black.into_game()?;
-        let points = |game: &GameResult, color: Color| match game.winner {
-            Some(winner) if winner == color => 1.0,
-            Some(_) => 0.0,
-            None => 0.5,
-        };
-        let score = (points(&as_white, Color::White) + points(&as_black, Color::Black)) / 2.0;
-        Ok((
-            OpeningPairResult {
-                opening_id: self.opening_id,
-                engine_a_as_white: as_white,
-                engine_a_as_black: as_black,
-                score,
-            },
-            self.metrics,
-        ))
-    }
-}
-
-#[cfg(feature = "alphamini")]
-fn load_or_create_pair_log(
-    path: &std::path::Path,
-    expected: &PairedLogHeader,
-) -> Result<(Vec<OpeningPairResult>, AlphaMiniMetrics), String> {
-    if !path.exists() {
-        if let Some(parent) = path
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            fs::create_dir_all(parent)
-                .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
-        }
-        let file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|error| format!("could not create {}: {error}", path.display()))?;
-        let mut writer = BufWriter::new(file);
-        serde_json::to_writer(&mut writer, expected)
-            .map_err(|error| format!("could not encode pair-log header: {error}"))?;
-        writer
-            .write_all(b"\n")
-            .and_then(|_| writer.flush())
-            .and_then(|_| writer.get_ref().sync_all())
-            .map_err(|error| format!("could not commit {}: {error}", path.display()))?;
-        sync_parent_directory(path)?;
-        return Ok((Vec::new(), AlphaMiniMetrics::default()));
-    }
-
-    let committed = read_pair_log_recovering_torn_tail(path)?;
-    let mut lines = committed.lines();
-    let header_line = lines
-        .next()
-        .ok_or_else(|| format!("pair log {} is empty", path.display()))?;
-    let actual: PairedLogHeader = serde_json::from_str(header_line)
-        .map_err(|error| format!("invalid pair-log header in {}: {error}", path.display()))?;
-    if actual != *expected {
-        return Err(format!(
-            "pair-log identity/config mismatch in {}; refuse to mix evaluations",
-            path.display()
-        ));
-    }
-
-    let mut pairs = Vec::new();
-    let mut metrics = AlphaMiniMetrics::default();
-    for (line_index, line) in lines.enumerate() {
-        if line.trim().is_empty() {
-            return Err(format!(
-                "blank line {} in pair log {}; refusing ambiguous recovery",
-                line_index + 2,
-                path.display()
-            ));
-        }
-        let stored: StoredPair = serde_json::from_str(line).map_err(|error| {
-            format!(
-                "invalid durable pair record on line {} of {}: {error}",
-                line_index + 2,
-                path.display()
-            )
-        })?;
-        let (pair, pair_metrics) = stored.into_pair()?;
-        let expected_id = expected.opening_ids.get(pairs.len()).ok_or_else(|| {
-            format!(
-                "pair log {} contains more pairs than its suite",
-                path.display()
-            )
-        })?;
-        if &pair.opening_id != expected_id {
-            return Err(format!(
-                "pair log {} is not the exact opening-suite prefix at record {}",
-                path.display(),
-                pairs.len()
-            ));
-        }
-        metrics = metrics_sum(metrics, pair_metrics);
-        pairs.push(pair);
-    }
-    if !pairs.is_empty() {
-        paired_report_from_results(actual.engine_a, actual.engine_b, pairs.clone())
-            .map_err(|error| format!("invalid recorded pair results: {error}"))?;
-    }
-    Ok((pairs, metrics))
-}
-
-/// A pair is durable only after its terminating newline and `sync_data` have
-/// completed. A crash can therefore leave bytes after the last newline; drop
-/// exactly that uncommitted suffix while preserving and validating every
-/// newline-terminated record. Corruption inside the committed prefix remains
-/// a hard error in the JSON/schema checks below.
-#[cfg(feature = "alphamini")]
-fn read_pair_log_recovering_torn_tail(path: &std::path::Path) -> Result<String, String> {
-    let mut bytes = fs::read(path)
-        .map_err(|error| format!("could not read pair log {}: {error}", path.display()))?;
-    let header_end = bytes
-        .iter()
-        .position(|&byte| byte == b'\n')
-        .ok_or_else(|| {
-            format!(
-                "pair log {} has no committed header newline",
-                path.display()
-            )
-        })?;
-    if bytes.last() != Some(&b'\n') {
-        let committed_len = bytes
-            .iter()
-            .rposition(|&byte| byte == b'\n')
-            .map(|index| index + 1)
-            .expect("header newline exists");
-        debug_assert!(committed_len > header_end);
-        let file = OpenOptions::new()
-            .write(true)
-            .open(path)
-            .map_err(|error| format!("could not open {} for recovery: {error}", path.display()))?;
-        file.set_len(committed_len as u64)
-            .and_then(|_| file.sync_all())
-            .map_err(|error| {
-                format!(
-                    "could not discard torn final pair record from {}: {error}",
-                    path.display()
-                )
-            })?;
-        bytes.truncate(committed_len);
-    }
-    String::from_utf8(bytes)
-        .map_err(|error| format!("pair log {} is not UTF-8: {error}", path.display()))
-}
-
-#[cfg(feature = "alphamini")]
-fn append_pair_log(path: &std::path::Path, pair: &StoredPair) -> Result<(), String> {
-    let file = OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|error| format!("could not append {}: {error}", path.display()))?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, pair)
-        .map_err(|error| format!("could not encode pair result: {error}"))?;
-    writer
-        .write_all(b"\n")
-        .and_then(|_| writer.flush())
-        .and_then(|_| writer.get_ref().sync_data())
-        .map_err(|error| {
-            format!(
-                "could not commit pair result to {}: {error}",
-                path.display()
-            )
-        })
 }
 
 #[cfg(feature = "alphamini")]
@@ -889,22 +609,6 @@ fn write_verdict_atomic(path: &std::path::Path, verdict: &GateVerdictV1) -> Resu
             path.display()
         )
     })
-}
-
-#[cfg(feature = "alphamini")]
-fn sync_parent_directory(path: &std::path::Path) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| std::path::Path::new("."));
-    File::open(parent)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|error| {
-            format!(
-                "could not fsync parent directory {}: {error}",
-                parent.display()
-            )
-        })
 }
 
 #[cfg(feature = "alphamini")]
@@ -1172,6 +876,14 @@ fn format_elo(elo: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "alphamini")]
+    use arena::{GameResult, OpeningPairResult, Termination};
+    #[cfg(feature = "alphamini")]
+    use chess_core::Color;
+    #[cfg(feature = "alphamini")]
+    use std::fs::OpenOptions;
+    #[cfg(feature = "alphamini")]
+    use std::io::Write;
 
     #[test]
     fn parses_options() {
@@ -1245,30 +957,31 @@ mod tests {
             schema: PAIRED_LOG_HEADER_SCHEMA.to_string(),
             engine_a: "AlphaMiniV1[abc]".to_string(),
             engine_b: "MinimaxDepth3V1".to_string(),
-            model_sha256: "a".repeat(64),
+            model_sha256: Some("a".repeat(64)),
             opponent_model_sha256: None,
-            opening_suite_sha256: "b".repeat(64),
+            opening_suite_sha256: Some("b".repeat(64)),
             opening_ids: vec!["opening-1".to_string()],
-            depth: 3,
+            depth: Some(3),
             seed: 1,
             max_plies: 512,
-            simulations: 128,
-            time_ms: 9_000,
-            batch_size: 8,
-            cpuct_ppm: FROZEN_GATE_CPUCT_PPM,
-            fpu_reduction_ppm: FROZEN_GATE_FPU_REDUCTION_PPM,
+            simulations: Some(128),
+            time_ms: Some(9_000),
+            batch_size: Some(8),
+            cpuct_ppm: Some(FROZEN_GATE_CPUCT_PPM),
+            fpu_reduction_ppm: Some(FROZEN_GATE_FPU_REDUCTION_PPM),
             bootstrap_samples: 20_000,
-            required_lower_score_ppm: 500_000,
+            required_lower_score_ppm: Some(500_000),
             minimax_v1_move_digest: MINIMAX_V1_MOVE_DIGEST,
-            evaluation_binary_sha256: "c".repeat(64),
+            evaluation_binary_sha256: Some("c".repeat(64)),
             target: "x86_64-linux".to_string(),
-            inference_device: "onnx-cpu".to_string(),
+            inference_device: Some("onnx-cpu".to_string()),
             exploratory: false,
+            stockfish_version: None,
+            uci_elo: None,
+            movetime_ms: None,
+            bot_url: None,
         };
-        assert_eq!(
-            load_or_create_pair_log(&path, &header).unwrap(),
-            (Vec::new(), AlphaMiniMetrics::default())
-        );
+        assert_eq!(load_or_create_pair_log(&path, &header).unwrap(), Vec::new());
         let pair = OpeningPairResult {
             opening_id: "opening-1".to_string(),
             engine_a_as_white: GameResult {
@@ -1288,9 +1001,9 @@ mod tests {
             completed_simulations: 5_376,
             ..AlphaMiniMetrics::default()
         };
-        append_pair_log(&path, &StoredPair::from_pair(&pair, metrics)).unwrap();
+        append_pair_log(&path, &StoredPair::from_pair(&pair, Some(metrics))).unwrap();
         let loaded = load_or_create_pair_log(&path, &header).unwrap();
-        assert_eq!(loaded, (vec![pair], metrics));
+        assert_eq!(loaded, vec![(pair, Some(metrics))]);
 
         let committed = fs::read(&path).unwrap();
         let mut file = OpenOptions::new().append(true).open(&path).unwrap();
@@ -1303,7 +1016,7 @@ mod tests {
         assert_eq!(fs::read(&path).unwrap(), committed);
 
         let mut changed = header;
-        changed.time_ms += 1;
+        changed.time_ms = Some(9_001);
         assert!(load_or_create_pair_log(&path, &changed).is_err());
     }
 

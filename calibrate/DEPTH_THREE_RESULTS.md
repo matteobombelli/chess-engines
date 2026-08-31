@@ -1,5 +1,9 @@
 # MinimaxDepth3V1 calibration
 
+> **Superseded for display.** The site now shows full-game ratings from the
+> Stockfish limited-strength ladder in `docs/ratings/full-game-elo.md`. The
+> move-quality estimate below remains valid for what it measures.
+
 Date: 2026-08-18
 
 ## Result

@@ -3,14 +3,15 @@
 
 Usage:
     scripts/minigpt-training-figures runs/minigpt-v1/metrics.jsonl 77000 \
+      --shards data/minigpt/shards/shards.json --params 40330240 \
       > frontend/src/minigpt_training.rs
 
 The output mirrors `frontend/src/training.rs`: point-string consts plus one
 `#[component]` that emits the same markup and CSS classes, so it inherits the
 existing chart styling with no new CSS.
 
-Deterministic: the same metrics file and horizon always produce byte-identical
-output. Re-run it when the training run finishes.
+Deterministic: the same inputs always produce byte-identical output. Re-run it
+when the training run finishes.
 """
 
 from __future__ import annotations
@@ -60,6 +61,9 @@ SHORT = Geometry(720, 150, 42.0, 704.0, 122.0, 17.2, 10.0, 34.0, 140.0)
 
 TICK_DY = 4.0
 MAX_POINTS = 180
+# micro_batch 64 x grad_accum 4, per configs/minigpt/v1.toml. Rows are whole
+# games, so a step's real token count is this times the corpus mean game length.
+GAMES_PER_STEP = 256
 # Minimum vertical gap between the two end labels on the loss chart.
 LABEL_SEPARATION = 13.0
 
@@ -202,10 +206,16 @@ def x_of(geometry: Geometry, step: float, total_steps: int) -> float:
     return geometry.x0 + fraction * (geometry.x1 - geometry.x0)
 
 
-def format_step(value: float) -> str:
-    if value < 1000:
-        return f"{int(round(value))}"
-    return f"{value / 1000:g}k"
+def format_tokens(value: float) -> str:
+    if value <= 0.0:
+        return "0"
+    return f"{value / 1e9:.2f}".rstrip("0").rstrip(".") + "B"
+
+
+def billions(value: float) -> str:
+    """The token count as a bare decimal, for phrases like "1.55-billion-token"."""
+
+    return f"{value / 1e9:.2f}".rstrip("0").rstrip(".")
 
 
 def format_loss(value: float) -> str:
@@ -240,6 +250,7 @@ def axis_markup(
     axis: Axis,
     total_steps: int,
     y_format: Callable[[float], str],
+    x_format: Callable[[float], str],
     *,
     label_zero: bool = False,
 ) -> list[str]:
@@ -270,7 +281,7 @@ def axis_markup(
         lines.append(
             f'<text class="tick" x="{coordinate(x_of(geometry, tick, total_steps))}" '
             f'y="{coordinate(geometry.x_label_y)}" text-anchor="middle">'
-            f"{rust_string(format_step(tick))}</text>"
+            f"{rust_string(x_format(tick))}</text>"
         )
     return lines
 
@@ -280,7 +291,27 @@ def indent(lines: Iterable[str], spaces: int) -> str:
     return "\n".join(pad + line for line in lines)
 
 
-def build(metrics_path: Path, total_steps: int) -> str:
+def read_corpus_counts(path: Path) -> tuple[int, int]:
+    """(train tokens, train games) from a `minigpt.shards.v1` manifest."""
+
+    counts = json.loads(path.read_text(encoding="utf-8"))["counts"]
+    tokens = int(counts["tokens_train"])
+    games = int(counts["games_train"])
+    if tokens <= 0 or games <= 0:
+        raise SystemExit(f"{path} reports an empty training corpus")
+    return tokens, games
+
+
+def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: int) -> str:
+    corpus_tokens, corpus_games = read_corpus_counts(shards_path)
+    tokens_per_step = GAMES_PER_STEP * corpus_tokens / corpus_games
+    trained_tokens = total_steps * tokens_per_step
+    epochs = trained_tokens / corpus_tokens
+    horizon_tokens = format_tokens(trained_tokens)
+
+    def x_format(step: float) -> str:
+        return format_tokens(step * tokens_per_step)
+
     records = read_metrics(metrics_path)
     if not records:
         raise SystemExit(f"{metrics_path} contains no metrics records")
@@ -308,7 +339,6 @@ def build(metrics_path: Path, total_steps: int) -> str:
     last = records[-1]
     first = records[0]
     completed = int(last["step"])
-    progress = completed / total_steps
     best_loss = float(last.get("best_validation_loss", last["validation_loss"]))
     best_step = int(last.get("best_validation_step", completed))
     in_progress = completed < total_steps
@@ -326,50 +356,51 @@ def build(metrics_path: Path, total_steps: int) -> str:
         else:
             train_y, val_y = middle - half, middle + half
 
-    horizon = f"{total_steps:,}"
+    completed_tokens = format_tokens(completed * tokens_per_step)
     intro_progress = (
-        f"This run is still in flight: {completed:,} of {horizon} steps are plotted below."
+        f"The run is still going, and {completed_tokens} of {horizon_tokens} tokens "
+        "are plotted below."
         if in_progress
-        else f"The run completed its full {horizon}-step horizon."
+        else f"The run reached its full {horizon_tokens}-token horizon."
     )
     sampling_note = (
         f" One point per evaluation, {len(records):,} evaluations downsampled to {len(sampled):,}."
         if len(sampled) < len(records)
-        else " One point per evaluation, every 500 steps."
+        else " One point per evaluation."
+    )
+    best_loss_note = (
+        f"Its best value, {best_loss:.2f}, came at "
+        f"{format_tokens(best_step * tokens_per_step)} tokens."
+        if best_step < completed
+        else "The lowest value is the last one, so the curve was still falling at the end."
+    )
+    span_phrase = (
+        f"over {completed_tokens} of {horizon_tokens} training tokens"
+        if in_progress
+        else f"over the full {horizon_tokens} training tokens"
     )
 
     loss_label = (
-        f"Training and validation loss against optimizer step. "
+        f"Training and validation loss against training tokens. "
         f"Validation falls from {first['validation_loss']:.2f} to "
-        f"{last['validation_loss']:.2f} over {completed:,} of {horizon} steps."
+        f"{last['validation_loss']:.2f} {span_phrase}."
     )
     top1_label = (
-        f"Validation top-1 move accuracy against optimizer step. It rises from "
+        f"Validation top-1 move accuracy against training tokens. It rises from "
         f"{first['validation_top1'] * 100:.1f}% to {last['validation_top1'] * 100:.1f}%."
     )
     lr_label = (
-        f"Learning rate against optimizer step. It warms up to "
+        f"Learning rate against training tokens. It warms up to "
         f"{format_rate(max(learning_rate.values))}, then decays on a cosine defined over "
-        f"the frozen {horizon}-step horizon."
+        f"the full {billions(trained_tokens)}-billion-token horizon."
     )
 
     out: list[str] = []
     out.append("// Generated by scripts/minigpt-training-figures. Do not edit by hand.")
     out.append("//")
     out.append(f"//     scripts/minigpt-training-figures {metrics_path} {total_steps} \\")
+    out.append(f"//       --shards {shards_path} --params {parameters} \\")
     out.append("//       > frontend/src/minigpt_training.rs")
-    out.append("//")
-    out.append("// MOUNT INSTRUCTION: add this one line to main.rs, inside the")
-    out.append("// `Model::MiniGpt => view! { <section class=\"about-model\" ...>` arm, in the")
-    out.append("// same position `<TrainingProgress/>` occupies in the `Model::AlphaMini` arm:")
-    out.append("//")
-    out.append("//     <MiniGptTrainingProgress/>")
-    out.append("//")
-    out.append("// The module is declared in main.rs but not yet rendered, because the")
-    out.append("// `Model::MiniGpt` arm does not exist in this tree yet. Drop the")
-    out.append("// `allow(dead_code)` below once the component is mounted.")
-    out.append("")
-    out.append("#![allow(dead_code)]")
     out.append("")
     out.append("use leptos::prelude::*;")
     out.append("")
@@ -387,9 +418,9 @@ def build(metrics_path: Path, total_steps: int) -> str:
     out.append(
         "                        "
         + rust_string(
-            "MiniGPT is trained once, on 11.2 million strong human games, to predict the "
-            "move a strong player would make next. There is no self-play and no search: "
-            "every point below is one pass of the optimizer over more of the same corpus. "
+            f"I trained MiniGPT once, on {corpus_games / 1e6:.1f} million human games, to "
+            "predict the move a strong player would play next. There is no self-play and "
+            "no search. The charts below run left to right in training tokens. "
             + intro_progress
         )
     )
@@ -399,7 +430,7 @@ def build(metrics_path: Path, total_steps: int) -> str:
         "                        "
         + rust_string(
             "Loss measures how surprised the model is by the move that was actually "
-            "played. Lower is better, and the validation curve is measured on games the "
+            "played. Lower is better. The validation curve is measured on games the "
             "optimizer never sees."
         )
     )
@@ -410,21 +441,21 @@ def build(metrics_path: Path, total_steps: int) -> str:
     out.append('            <dl class="training-stats">')
     for title, value, note in [
         (
-            "Training steps",
-            f"{completed:,} / {horizon}",
-            f"{progress * 100:.1f}% of the frozen horizon. One step is 256 whole games, "
-            "about 20,000 real move tokens.",
+            "Training tokens",
+            horizon_tokens,
+            f"The corpus has {corpus_tokens / 1e6:.0f} million unique training tokens, so "
+            f"the run is about {epochs:.2f} passes over it.",
         ),
         (
-            "Train loss",
-            f"{first['train_loss']:.2f} → {last['train_loss']:.2f}",
-            "Loss on the batches the optimizer is updating on, one point per evaluation.",
+            "Parameters",
+            f"{parameters:,}",
+            "The input embedding is reused as the output layer, so the vocabulary is "
+            "counted once.",
         ),
         (
             "Validation loss",
-            f"{first['validation_loss']:.2f} → {last['validation_loss']:.2f}",
-            f"The same loss on held-out games. Its best value, {best_loss:.2f}, "
-            f"came at step {best_step:,}.",
+            f"{first['validation_loss']:.2f} to {last['validation_loss']:.2f}",
+            "Loss on held-out games the optimizer never sees. " + best_loss_note,
         ),
         (
             "Move accuracy",
@@ -454,7 +485,7 @@ def build(metrics_path: Path, total_steps: int) -> str:
         f'                <svg viewBox="0 0 {WIDE.view_w} {WIDE.view_h}" role="img" '
         f"aria-label={rust_string(loss_label)}>"
     )
-    out.append(indent(axis_markup(WIDE, loss_axis, total_steps, format_loss), 20))
+    out.append(indent(axis_markup(WIDE, loss_axis, total_steps, format_loss, x_format), 20))
     out.append('                    <polyline class="series-val" points=VAL_LOSS_PTS></polyline>')
     out.append(
         '                    <polyline class="series-train" points=TRAIN_LOSS_PTS></polyline>'
@@ -485,9 +516,9 @@ def build(metrics_path: Path, total_steps: int) -> str:
         + rust_string(
             " How surprised the model is by the move that was played."
             + sampling_note
-            + " Train and validation track each other closely, which is what a single"
-            " pass over a corpus this large should look like: the model has not seen"
-            " enough of any position to memorize it."
+            + " Train and validation sit on top of each other for the whole run. With"
+            f" {corpus_tokens / 1e6:.0f} million unique tokens and only {epochs:.2f} passes"
+            " over them, the model never sees a position often enough to memorize it."
         )
     )
     out.append("                </figcaption>")
@@ -500,7 +531,7 @@ def build(metrics_path: Path, total_steps: int) -> str:
         f'                <svg viewBox="0 0 {SHORT.view_w} {SHORT.view_h}" role="img" '
         f"aria-label={rust_string(top1_label)}>"
     )
-    out.append(indent(axis_markup(SHORT, top1_axis, total_steps, format_percent), 20))
+    out.append(indent(axis_markup(SHORT, top1_axis, total_steps, format_percent, x_format), 20))
     out.append('                    <polyline class="series-val" points=TOP1_PTS></polyline>')
     out.append("                </svg>")
     out.append("                <figcaption>")
@@ -509,9 +540,9 @@ def build(metrics_path: Path, total_steps: int) -> str:
         "                    "
         + rust_string(
             " How often the model's single best legal move is the one the human actually"
-            " played, on held-out games. A perfect score is not the goal: strong players"
-            " disagree with each other constantly, so most of the remaining gap is real"
-            " choice rather than error."
+            " played, on held-out games. A perfect score is not the goal. Strong players"
+            " disagree with each other all the time, so much of the remaining gap is a"
+            " real difference of opinion."
         )
     )
     out.append("                </figcaption>")
@@ -524,7 +555,12 @@ def build(metrics_path: Path, total_steps: int) -> str:
         f'                <svg viewBox="0 0 {SHORT.view_w} {SHORT.view_h}" role="img" '
         f"aria-label={rust_string(lr_label)}>"
     )
-    out.append(indent(axis_markup(SHORT, lr_axis, total_steps, format_rate, label_zero=True), 20))
+    out.append(
+        indent(
+            axis_markup(SHORT, lr_axis, total_steps, format_rate, x_format, label_zero=True),
+            20,
+        )
+    )
     out.append('                    <polyline class="series-train" points=LR_PTS></polyline>')
     out.append("                </svg>")
     out.append("                <figcaption>")
@@ -532,10 +568,11 @@ def build(metrics_path: Path, total_steps: int) -> str:
     out.append(
         "                    "
         + rust_string(
-            " The size of each weight update. It rises over the first 2% of the horizon,"
-            " then follows a cosine decay defined over exactly the frozen step count, so"
-            " late updates only make small adjustments. Changing the horizon would change"
-            " the schedule, and therefore the model."
+            " The size of each weight update. It rises over the first 2% of the run, then"
+            " follows a cosine decay defined over the full"
+            f" {billions(trained_tokens)}-billion-token horizon, so late updates only make"
+            " small adjustments. Changing that horizon would change the schedule, and with"
+            " it the model."
         )
     )
     out.append("                </figcaption>")
@@ -553,10 +590,26 @@ def main(argv: Sequence[str]) -> int:
     )
     parser.add_argument("metrics", type=Path, help="path to a run's metrics.jsonl")
     parser.add_argument("total_steps", type=int, help="the run's frozen training.total_steps")
+    parser.add_argument(
+        "--shards",
+        type=Path,
+        required=True,
+        help="path to the corpus shards.json, for the token and game counts",
+    )
+    parser.add_argument(
+        "--params",
+        type=int,
+        required=True,
+        help="the model's total parameter count",
+    )
     arguments = parser.parse_args(argv)
     if arguments.total_steps <= 0:
         parser.error("total_steps must be positive")
-    sys.stdout.write(build(arguments.metrics, arguments.total_steps))
+    if arguments.params <= 0:
+        parser.error("params must be positive")
+    sys.stdout.write(
+        build(arguments.metrics, arguments.total_steps, arguments.shards, arguments.params)
+    )
     return 0
 
 

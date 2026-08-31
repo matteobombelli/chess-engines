@@ -1,5 +1,9 @@
 # Chess.com 30+0 calibration
 
+> **Superseded for display.** The site now shows full-game ratings from the
+> Stockfish limited-strength ladder in `docs/ratings/full-game-elo.md`. This
+> tool's move-quality estimates remain valid for what they measure.
+
 This tool estimates a bot's **Chess.com rated 30+0 move-quality equivalent**.
 Chess.com groups 30+0 in its Rapid rating pool; the collector nevertheless
 accepts only the exact `TimeControl` value `1800`, so other Rapid controls never

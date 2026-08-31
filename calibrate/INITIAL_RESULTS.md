@@ -1,5 +1,9 @@
 # Initial Chess.com 30+0 calibration
 
+> **Superseded for display.** The site now shows full-game ratings from the
+> Stockfish limited-strength ladder in `docs/ratings/full-game-elo.md`. The
+> move-quality estimate below remains valid for what it measures.
+
 Date: 2026-08-13
 
 These are preliminary move-quality-equivalent estimates, not ratings earned by

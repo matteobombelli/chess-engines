@@ -1,5 +1,9 @@
 use std::fmt;
 
+pub mod http;
+pub mod rating_log;
+pub mod uci;
+
 use chess_core::{Board, Color, Move, Status};
 use minimax::{SearchLimits, find_best_move};
 use rand::rngs::StdRng;
@@ -170,7 +174,8 @@ pub struct AlphaMiniEngine {
     metrics: AlphaMiniMetrics,
 }
 
-#[cfg(feature = "alphamini")]
+/// Search counters recorded alongside an AlphaMini pair result. The type is
+/// always available so a durable pair log can be read without the feature.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AlphaMiniMetrics {
     pub moves: u64,
