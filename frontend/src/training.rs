@@ -117,7 +117,9 @@ pub fn ChartHover(spec: HoverSpec) -> impl IntoView {
                 .iter()
                 .enumerate()
                 .min_by(|(_, a), (_, b)| {
-                    (a.0 - coordinate).abs().total_cmp(&(b.0 - coordinate).abs())
+                    (a.0 - coordinate)
+                        .abs()
+                        .total_cmp(&(b.0 - coordinate).abs())
                 })
                 .map(|(index, _)| index)
         });

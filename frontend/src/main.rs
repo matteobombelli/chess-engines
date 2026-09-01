@@ -17,7 +17,12 @@ use training::TrainingProgress;
 
 const START_FEN: &str = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/// Where the in-progress game is kept between page loads. The version suffix
+/// means a future format change can ignore old values instead of misreading
+/// them.
+const SAVE_KEY: &str = "chessengines.game.v1";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Model {
     Random,
     MinimaxDepth3,
@@ -76,6 +81,123 @@ impl Model {
             Self::MiniGpt => "/projects/chessengines/api/minigpt/move",
         }
     }
+
+    /// Stable name used in saved games. Changing one of these strings orphans
+    /// every game already in a visitor's browser, so they are kept apart from
+    /// the display labels.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Random => "random",
+            Self::MinimaxDepth3 => "minimax-depth-3",
+            Self::MinimaxNineSeconds => "minimax-nine-seconds",
+            Self::AlphaMini => "alphamini",
+            Self::MiniGpt => "minigpt",
+        }
+    }
+
+    fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "random" => Some(Self::Random),
+            "minimax-depth-3" => Some(Self::MinimaxDepth3),
+            "minimax-nine-seconds" => Some(Self::MinimaxNineSeconds),
+            "alphamini" => Some(Self::AlphaMini),
+            "minigpt" => Some(Self::MiniGpt),
+            _ => None,
+        }
+    }
+}
+
+fn color_id(color: Color) -> &'static str {
+    match color {
+        Color::White => "white",
+        Color::Black => "black",
+    }
+}
+
+fn color_from_id(id: &str) -> Option<Color> {
+    match id {
+        "white" => Some(Color::White),
+        "black" => Some(Color::Black),
+        _ => None,
+    }
+}
+
+/// The saved game exactly as it is written to localStorage.
+#[derive(Serialize, Deserialize)]
+struct SavedGame {
+    model: String,
+    color: String,
+    san: Vec<String>,
+}
+
+/// A saved game that has been checked and replayed.
+struct RestoredGame {
+    model: Model,
+    color: Color,
+    san: Vec<String>,
+    board: Board,
+}
+
+/// Replay a list of SAN moves from the starting position.
+///
+/// `None` covers every way the list can be wrong: a token that is not a move,
+/// a move that is not legal in the position it reaches, or a move played after
+/// the game has already ended.
+fn replay_san(moves: &[String]) -> Option<Board> {
+    let mut board = Board::from_fen(START_FEN).ok()?;
+    for san in moves {
+        if board.status() != Status::Ongoing {
+            return None;
+        }
+        board.san_to_move(san).ok()?;
+    }
+    Some(board)
+}
+
+/// Turn a stored value into a game. Pure, so the discard rules are testable
+/// without a browser.
+fn parse_saved_game(raw: &str) -> Option<RestoredGame> {
+    let saved: SavedGame = serde_json::from_str(raw).ok()?;
+    let model = Model::from_id(&saved.model)?;
+    let color = color_from_id(&saved.color)?;
+    let board = replay_san(&saved.san)?;
+    Some(RestoredGame {
+        model,
+        color,
+        san: saved.san,
+        board,
+    })
+}
+
+/// localStorage, or `None` where it is unavailable. Reading the property
+/// throws in a private window, so every caller treats storage as optional.
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn save_game(model: Model, color: Color, moves: &[String]) {
+    let Some(storage) = local_storage() else {
+        return;
+    };
+    let saved = SavedGame {
+        model: model.id().to_string(),
+        color: color_id(color).to_string(),
+        san: moves.to_vec(),
+    };
+    if let Ok(encoded) = serde_json::to_string(&saved) {
+        let _ = storage.set_item(SAVE_KEY, &encoded);
+    }
+}
+
+/// Read the saved game, dropping the key when it cannot be replayed.
+fn load_game() -> Option<RestoredGame> {
+    let storage = local_storage()?;
+    let raw = storage.get_item(SAVE_KEY).ok().flatten()?;
+    let restored = parse_saved_game(&raw);
+    if restored.is_none() {
+        let _ = storage.remove_item(SAVE_KEY);
+    }
+    restored
 }
 
 #[derive(Serialize)]
@@ -98,17 +220,47 @@ struct BotErrorResponse {
 
 #[component]
 fn App() -> impl IntoView {
-    let board = RwSignal::new(Board::from_fen(START_FEN).expect("valid start position"));
+    // Seed the signals from the saved game before the first render, so a
+    // refresh paints the position it left off at instead of the start position.
+    let restored = load_game();
+    let (start_board, start_history, start_model, start_color) = match &restored {
+        Some(game) => (game.board.clone(), game.san.clone(), game.model, game.color),
+        None => (
+            Board::from_fen(START_FEN).expect("valid start position"),
+            Vec::new(),
+            Model::Random,
+            Color::White,
+        ),
+    };
+
+    let board = RwSignal::new(start_board);
     let selected = RwSignal::new(None::<Square>);
     let dragged = RwSignal::new(None::<Square>);
-    let history = RwSignal::new(Vec::<String>::new());
+    let history = RwSignal::new(start_history);
     let thinking = RwSignal::new(false);
     let error = RwSignal::new(None::<String>);
     let game_id = RwSignal::new(0_u32);
     let pending_promotion = RwSignal::new(None::<(Square, Square)>);
-    let player_color = RwSignal::new(Color::White);
-    let selected_model = RwSignal::new(Model::Random);
+    let player_color = RwSignal::new(start_color);
+    let selected_model = RwSignal::new(start_model);
     let bot_selector = NodeRef::<leptos::html::Details>::new();
+
+    // A refresh can land in the middle of the bot's turn, which loses the
+    // in-flight request. Ask again from the restored position. `start_game` is
+    // deliberately not used here: it would reset the board it just restored.
+    if let Some(game) = restored
+        && game.board.status() == Status::Ongoing
+        && game.board.side_to_move != game.color
+    {
+        let movetext = game.board.export_san();
+        start_bot_turn(
+            board, history, thinking, error, game_id, movetext, game.board, game.model,
+        );
+    }
+
+    Effect::new(move |_| {
+        save_game(selected_model.get(), player_color.get(), &history.get());
+    });
 
     let reset = move |_| {
         start_game(
@@ -125,8 +277,20 @@ fn App() -> impl IntoView {
         );
     };
 
+    let locked = move || game_locked(history.get().len());
+
+    // The dropdown can be open when the bot's reply lands and locks the game.
+    // Shut it so the panel cannot be left showing options that do nothing.
+    Effect::new(move |_| {
+        if locked()
+            && let Some(selector) = bot_selector.get()
+        {
+            let _ = selector.remove_attribute("open");
+        }
+    });
+
     let switch_sides = move |_| {
-        if side_switch_locked(history.get_untracked().len()) {
+        if game_locked(history.get_untracked().len()) {
             return;
         }
 
@@ -146,6 +310,31 @@ fn App() -> impl IntoView {
             game_id,
             pending_promotion,
             selected_model.get_untracked(),
+        );
+    };
+
+    let choose_model = move |model: Model| {
+        if let Some(selector) = bot_selector.get_untracked() {
+            let _ = selector.remove_attribute("open");
+        }
+        if game_locked(history.get_untracked().len()) || selected_model.get_untracked() == model {
+            return;
+        }
+
+        selected_model.set(model);
+        // Restart, the same way switching sides does, so an opening move made
+        // by the previous bot never carries into the new one's game.
+        start_game(
+            player_color.get_untracked(),
+            board,
+            selected,
+            dragged,
+            history,
+            thinking,
+            error,
+            game_id,
+            pending_promotion,
+            model,
         );
     };
 
@@ -254,7 +443,7 @@ fn App() -> impl IntoView {
                 <div class="header-actions">
                     <button
                         class="switch-side"
-                        disabled=move || side_switch_locked(history.get().len())
+                        disabled=locked
                         on:click=switch_sides
                     >
                         "Switch sides"
@@ -382,8 +571,21 @@ fn App() -> impl IntoView {
                 <aside>
                     <div class="panel bot-panel">
                         <p class="bot-label" id="opponent-label">"Opponent"</p>
-                        <details class="bot-selector" node_ref=bot_selector>
-                            <summary aria-labelledby="opponent-label">
+                        <details
+                            class=move || if locked() { "bot-selector locked" } else { "bot-selector" }
+                            node_ref=bot_selector
+                        >
+                            <summary
+                                aria-labelledby="opponent-label"
+                                aria-disabled=move || if locked() { "true" } else { "false" }
+                                on:click=move |event| {
+                                    // Keep the dropdown shut while the game runs.
+                                    // Enter and Space on the summary arrive here too.
+                                    if locked() {
+                                        event.prevent_default();
+                                    }
+                                }
+                            >
                                 <span>{move || selected_model.get().selector_label()}</span>
                                 <span class="bot-option-elo">
                                     {move || selected_model.get().elo_label()}
@@ -406,13 +608,9 @@ fn App() -> impl IntoView {
                                             } else {
                                                 "bot-option"
                                             }
+                                            disabled=locked
                                             aria-pressed=move || selected_model.get() == model
-                                            on:click=move |_| {
-                                                selected_model.set(model);
-                                                if let Some(selector) = bot_selector.get() {
-                                                    let _ = selector.remove_attribute("open");
-                                                }
-                                            }
+                                            on:click=move |_| choose_model(model)
                                         >
                                             <span>{model.selector_label()}</span>
                                             <span class="bot-option-elo">{model.elo_label()}</span>
@@ -921,7 +1119,9 @@ fn move_count(half_moves: usize) -> String {
     }
 }
 
-fn side_switch_locked(half_moves: usize) -> bool {
+/// Once both sides have moved, the opponent and the side you play are fixed
+/// for the rest of the game. "New game" is what clears it.
+fn game_locked(half_moves: usize) -> bool {
     half_moves >= 2
 }
 
@@ -1018,11 +1218,112 @@ mod tests {
     }
 
     #[test]
-    fn side_switch_locks_after_one_full_move() {
-        assert!(!side_switch_locked(0));
-        assert!(!side_switch_locked(1));
-        assert!(side_switch_locked(2));
-        assert!(side_switch_locked(3));
+    fn game_locks_after_one_full_move() {
+        assert!(!game_locked(0));
+        assert!(!game_locked(1));
+        assert!(game_locked(2));
+        assert!(game_locked(3));
+    }
+
+    #[test]
+    fn model_ids_round_trip() {
+        for model in [
+            Model::Random,
+            Model::MinimaxDepth3,
+            Model::MinimaxNineSeconds,
+            Model::AlphaMini,
+            Model::MiniGpt,
+        ] {
+            assert_eq!(Model::from_id(model.id()), Some(model));
+        }
+        assert_eq!(Model::from_id("stockfish"), None);
+        assert_eq!(Model::from_id(""), None);
+    }
+
+    #[test]
+    fn colors_round_trip() {
+        assert_eq!(color_from_id(color_id(Color::White)), Some(Color::White));
+        assert_eq!(color_from_id(color_id(Color::Black)), Some(Color::Black));
+        assert_eq!(color_from_id("green"), None);
+    }
+
+    #[test]
+    fn replay_rebuilds_a_short_game() {
+        let moves = ["e4", "e5", "Nf3", "Nc6"].map(String::from).to_vec();
+        let board = replay_san(&moves).expect("a legal game replays");
+
+        assert_eq!(board.side_to_move, Color::White);
+        assert_eq!(board.san_history, moves);
+        assert_eq!(board.status(), Status::Ongoing);
+        assert_eq!(board.export_san(), "1. e4 e5 2. Nf3 Nc6");
+    }
+
+    #[test]
+    fn replay_of_an_empty_game_is_the_start_position() {
+        let board = replay_san(&[]).expect("no moves replays");
+        assert_eq!(board.to_fen(), START_FEN);
+    }
+
+    #[test]
+    fn replay_rejects_garbage() {
+        // Not a move at all.
+        assert!(replay_san(&["e4".into(), "hello".into()]).is_none());
+        // Well formed, illegal in the position it reaches.
+        assert!(replay_san(&["e4".into(), "e5".into(), "e5".into()]).is_none());
+        // Illegal on the very first ply.
+        assert!(replay_san(&["Qd5".into()]).is_none());
+        // Playing on after checkmate.
+        assert!(
+            replay_san(&[
+                "f3".into(),
+                "e5".into(),
+                "g4".into(),
+                "Qh4#".into(),
+                "a3".into()
+            ])
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn a_saved_game_parses_back_into_its_signals() {
+        let raw = r#"{"model":"alphamini","color":"black","san":["e4","e5"]}"#;
+        let game = parse_saved_game(raw).expect("a well formed value restores");
+
+        assert_eq!(game.model, Model::AlphaMini);
+        assert_eq!(game.color, Color::Black);
+        assert_eq!(game.san, vec!["e4".to_string(), "e5".to_string()]);
+        assert_eq!(game.board.san_history.len(), 2);
+    }
+
+    #[test]
+    fn a_saved_game_round_trips_through_json() {
+        let saved = SavedGame {
+            model: Model::MiniGpt.id().to_string(),
+            color: color_id(Color::White).to_string(),
+            san: vec!["d4".to_string()],
+        };
+        let encoded = serde_json::to_string(&saved).expect("serializes");
+        let game = parse_saved_game(&encoded).expect("restores");
+
+        assert_eq!(game.model, Model::MiniGpt);
+        assert_eq!(game.color, Color::White);
+        assert_eq!(game.san, vec!["d4".to_string()]);
+    }
+
+    #[test]
+    fn a_damaged_saved_game_is_discarded() {
+        // Not JSON.
+        assert!(parse_saved_game("").is_none());
+        assert!(parse_saved_game("{oops").is_none());
+        // JSON of the wrong shape.
+        assert!(parse_saved_game(r#"{"model":"random"}"#).is_none());
+        assert!(parse_saved_game(r#"[1, 2, 3]"#).is_none());
+        // A model or colour this build does not know.
+        assert!(parse_saved_game(r#"{"model":"leela","color":"white","san":[]}"#).is_none());
+        assert!(parse_saved_game(r#"{"model":"random","color":"teal","san":[]}"#).is_none());
+        // Moves that do not replay.
+        assert!(parse_saved_game(r#"{"model":"random","color":"white","san":["e9"]}"#).is_none());
     }
 
     #[test]
