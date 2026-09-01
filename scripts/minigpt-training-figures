@@ -61,6 +61,9 @@ SHORT = Geometry(720, 150, 42.0, 704.0, 122.0, 17.2, 10.0, 34.0, 140.0)
 
 TICK_DY = 4.0
 MAX_POINTS = 180
+# Top of the hover capture rect, a little above the highest gridline so the
+# readout has room without overlapping the baseline rule.
+HOVER_TOP = 4.0
 # micro_batch 64 x grad_accum 4, per configs/minigpt/v1.toml. Rows are whole
 # games, so a step's real token count is this times the corpus mean game length.
 GAMES_PER_STEP = 256
@@ -245,6 +248,48 @@ def rust_string(value: str) -> str:
     return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+def rust_f64(value: float) -> str:
+    text = f"{float(value):.12g}"
+    return text if any(character in text for character in ".e") else text + ".0"
+
+
+def hover_markup(
+    geometry: Geometry,
+    axis: Axis,
+    trained_tokens: float,
+    y_format: str,
+    series: Sequence[tuple[str, str, str]],
+) -> list[str]:
+    """The hover layer for one chart, with the axis mappings it needs to turn
+    SVG coordinates back into data values."""
+
+    lines = ["<ChartHover spec=HoverSpec {"]
+    lines.append(f"    view_w: {rust_f64(geometry.view_w)},")
+    lines.append(f"    left: {rust_f64(geometry.x0)},")
+    lines.append(f"    right: {rust_f64(geometry.x1)},")
+    lines.append(f"    top: {rust_f64(HOVER_TOP)},")
+    lines.append(f"    bottom: {rust_f64(geometry.baseline_y)},")
+    lines.append(
+        f"    x_axis: Axis {{ svg_a: {rust_f64(geometry.x0)}, data_a: 0.0, "
+        f"svg_b: {rust_f64(geometry.x1)}, data_b: {rust_f64(trained_tokens / 1e9)} }},"
+    )
+    lines.append(
+        f"    y_axis: Axis {{ svg_a: {rust_f64(axis.bottom)}, data_a: {rust_f64(axis.low)}, "
+        f"svg_b: {rust_f64(geometry.top_y)}, data_b: {rust_f64(axis.high)} }},"
+    )
+    lines.append("    x_fmt: Fmt::Billions,")
+    lines.append(f"    y_fmt: Fmt::{y_format},")
+    lines.append("    series: vec![")
+    for label, css_class, const_name in series:
+        lines.append(
+            f"        HoverSeries::new({rust_string(label)}, "
+            f"{rust_string(css_class)}, {const_name}),"
+        )
+    lines.append("    ],")
+    lines.append("} />")
+    return lines
+
+
 def axis_markup(
     geometry: Geometry,
     axis: Axis,
@@ -402,6 +447,7 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
     out.append(f"//       --shards {shards_path} --params {parameters} \\")
     out.append("//       > frontend/src/minigpt_training.rs")
     out.append("")
+    out.append("use crate::training::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};")
     out.append("use leptos::prelude::*;")
     out.append("")
     for name, value in consts:
@@ -429,9 +475,10 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
     out.append(
         "                        "
         + rust_string(
-            "Loss measures how surprised the model is by the move that was actually "
-            "played. Lower is better. The validation curve is measured on games the "
-            "optimizer never sees."
+            "Loss is the cross-entropy between the model's next-move distribution and "
+            "the move that was actually played, averaged over every move in the batch. "
+            "Lower is better. The validation curve is measured on games the optimizer "
+            "never sees."
         )
     )
     out.append("                    </p>")
@@ -460,8 +507,8 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
         (
             "Move accuracy",
             f"{last['validation_top1'] * 100:.1f}%",
-            "How often the single highest-scoring legal move is the one the human "
-            "actually played, on held-out games.",
+            "How often the move the model scores highest is the one the human actually "
+            "played, on held-out games.",
         ),
     ]:
         out.append("                <div>")
@@ -508,13 +555,29 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
         f'                    <text class="end-label" x="{coordinate(end_x + 10)}" '
         f'y="{coordinate(train_y + TICK_DY)}">{train_end_label}</text>'
     )
+    out.append(
+        indent(
+            hover_markup(
+                WIDE,
+                loss_axis,
+                trained_tokens,
+                "Loss",
+                [
+                    ("train", "hover-dot-train", "TRAIN_LOSS_PTS"),
+                    ("validation", "hover-dot-val", "VAL_LOSS_PTS"),
+                ],
+            ),
+            20,
+        )
+    )
     out.append("                </svg>")
     out.append("                <figcaption>")
     out.append('                    <strong>"Loss."</strong>')
     out.append(
         "                    "
         + rust_string(
-            " How surprised the model is by the move that was played."
+            " How much probability the model put on the move that was played, scored as"
+            " cross-entropy and averaged over every move in the batch."
             + sampling_note
             + " Train and validation sit on top of each other for the whole run. With"
             f" {corpus_tokens / 1e6:.0f} million unique tokens and only {epochs:.2f} passes"
@@ -533,16 +596,28 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
     )
     out.append(indent(axis_markup(SHORT, top1_axis, total_steps, format_percent, x_format), 20))
     out.append('                    <polyline class="series-val" points=TOP1_PTS></polyline>')
+    out.append(
+        indent(
+            hover_markup(
+                SHORT,
+                top1_axis,
+                trained_tokens,
+                "Percent",
+                [("", "hover-dot-val", "TOP1_PTS")],
+            ),
+            20,
+        )
+    )
     out.append("                </svg>")
     out.append("                <figcaption>")
     out.append('                    <strong>"Move accuracy."</strong>')
     out.append(
         "                    "
         + rust_string(
-            " How often the model's single best legal move is the one the human actually"
-            " played, on held-out games. A perfect score is not the goal. Strong players"
-            " disagree with each other all the time, so much of the remaining gap is a"
-            " real difference of opinion."
+            " How often the move the model scores highest is the one the human actually"
+            " played, counted over every move in the held-out games. A perfect score is"
+            " not the goal. Strong players disagree with each other all the time, so much"
+            " of the remaining gap is a real difference of opinion."
         )
     )
     out.append("                </figcaption>")
@@ -562,17 +637,29 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
         )
     )
     out.append('                    <polyline class="series-train" points=LR_PTS></polyline>')
+    out.append(
+        indent(
+            hover_markup(
+                SHORT,
+                lr_axis,
+                trained_tokens,
+                "Rate",
+                [("", "hover-dot-train", "LR_PTS")],
+            ),
+            20,
+        )
+    )
     out.append("                </svg>")
     out.append("                <figcaption>")
     out.append('                    <strong>"Learning rate."</strong>')
     out.append(
         "                    "
         + rust_string(
-            " The size of each weight update. It rises over the first 2% of the run, then"
-            " follows a cosine decay defined over the full"
-            f" {billions(trained_tokens)}-billion-token horizon, so late updates only make"
-            " small adjustments. Changing that horizon would change the schedule, and with"
-            " it the model."
+            " The size of each weight update. It ramps up over the first 2% of the run to"
+            f" {format_rate(max(learning_rate.values))}, then follows a cosine decay"
+            f" defined over the full {billions(trained_tokens)}-billion-token horizon, so"
+            " late updates only make small adjustments. Changing that horizon would change"
+            " the schedule, and with it the model."
         )
     )
     out.append("                </figcaption>")

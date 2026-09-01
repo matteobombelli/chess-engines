@@ -4,6 +4,7 @@
 //       --shards data/minigpt/shards/shards.json --params 40330240 \
 //       > frontend/src/minigpt_training.rs
 
+use crate::training::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};
 use leptos::prelude::*;
 
 const TRAIN_LOSS_PTS: &str = "45.6,32.5 49.3,108.1 52.9,141.3 56.5,157.5 60.2,166.9 63.8,172.4 67.5,176.2 71.1,178.8 74.7,180.8 78.4,182.6 82,184.4 85.6,185.6 89.3,186.6 92.9,187.5 96.5,188.6 100.2,189.4 103.8,190.1 107.5,190.9 111.1,191.2 114.7,191.9 118.4,192.3 122,192.9 125.6,193.5 129.3,193.9 132.9,194.2 136.5,194.5 140.2,195 143.8,195.3 147.5,195.7 151.1,195.9 154.7,196.3 158.4,196.6 162,196.6 165.6,197.1 169.3,197.3 172.9,197.5 176.5,197.8 180.2,197.8 183.8,198.1 187.5,198.2 191.1,198.6 194.7,198.7 198.4,198.9 202,199 205.6,199.2 209.3,199.2 212.9,199.7 216.5,199.5 220.2,199.9 223.8,199.9 227.5,199.9 231.1,200.3 234.7,200.4 238.4,200.6 242,200.7 245.6,200.8 249.3,200.7 252.9,200.9 256.5,201.1 260.2,201.2 263.8,201.2 267.5,201.5 271.1,201.5 274.7,201.6 278.4,201.8 282,201.9 285.6,202.1 289.3,202 292.9,202.2 296.5,202.1 300.2,202.3 303.8,202.4 307.5,202.4 311.1,202.6 314.7,202.6 318.4,202.7 322,202.7 325.6,203.1 329.3,203.1 332.9,203.2 336.5,203.2 340.2,203.1 343.8,203.4 347.5,203.4 351.1,203.5 354.7,203.5 358.4,203.8 362,204 365.6,204.1 369.3,204.2 372.9,204.1 376.5,204.3 380.2,204.2 383.8,204.5 387.5,204.4 391.1,204.3 394.7,204.6 398.4,204.6 402,204.7 405.6,204.7 409.3,204.6 412.9,204.8 416.5,204.8 420.2,205 423.8,205 427.5,205 431.1,205.2 434.7,205.2 438.4,205.3 442,205.2 445.6,205.3 449.3,205.4 452.9,205.5 456.5,205.4 460.2,205.5 463.8,205.6 467.5,205.6 471.1,205.6 474.7,205.8 478.4,205.8 482,205.9 485.6,205.9 489.3,206 492.9,206.1 496.5,206 500.2,206 503.8,206.1 507.5,206.1 511.1,206.2 514.7,206.1 518.4,206.3 522,206.3 525.6,206.3 529.3,206.4 532.9,206.3 536.5,206.3 540.2,206.4 543.8,206.5 547.5,206.5 551.1,206.5 554.7,206.5 558.4,206.6 562,206.6 565.6,206.6 569.3,206.6 572.9,206.6 576.5,206.7 580.2,206.7 583.8,206.6 587.5,206.6 591.1,206.7 594.7,206.8 598.4,206.8 602,206.7";
@@ -25,7 +26,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                         "I trained MiniGPT once, on 11.2 million human games, to predict the move a strong player would play next. There is no self-play and no search. The charts below run left to right in training tokens. The run reached its full 1.55B-token horizon."
                     </p>
                     <p>
-                        "Loss measures how surprised the model is by the move that was actually played. Lower is better. The validation curve is measured on games the optimizer never sees."
+                        "Loss is the cross-entropy between the model's next-move distribution and the move that was actually played, averaged over every move in the batch. Lower is better. The validation curve is measured on games the optimizer never sees."
                     </p>
                 </div>
             </div>
@@ -56,7 +57,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <dt>"Move accuracy"</dt>
                     <dd class="stat-value">"53.4%"</dd>
                     <dd class="stat-note">
-                        "How often the single highest-scoring legal move is the one the human actually played, on held-out games."
+                        "How often the move the model scores highest is the one the human actually played, on held-out games."
                     </dd>
                 </div>
             </dl>
@@ -86,10 +87,25 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <circle class="dot-train" cx="602" cy="206.7" r="4"></circle>
                     <text class="end-label" x="612" y="217.8">"validation 1.42"</text>
                     <text class="end-label" x="612" y="204.8">"train 1.45"</text>
+                    <ChartHover spec=HoverSpec {
+                        view_w: 720.0,
+                        left: 42.0,
+                        right: 602.0,
+                        top: 4.0,
+                        bottom: 232.0,
+                        x_axis: Axis { svg_a: 42.0, data_a: 0.0, svg_b: 602.0, data_b: 1.54595277648 },
+                        y_axis: Axis { svg_a: 222.0, data_a: 1.07480765351, svg_b: 18.5, data_b: 6.12900938335 },
+                        x_fmt: Fmt::Billions,
+                        y_fmt: Fmt::Loss,
+                        series: vec![
+                            HoverSeries::new("train", "hover-dot-train", TRAIN_LOSS_PTS),
+                            HoverSeries::new("validation", "hover-dot-val", VAL_LOSS_PTS),
+                        ],
+                    } />
                 </svg>
                 <figcaption>
                     <strong>"Loss."</strong>
-                    " How surprised the model is by the move that was played. One point per evaluation. Train and validation sit on top of each other for the whole run. With 876 million unique tokens and only 1.76 passes over them, the model never sees a position often enough to memorize it."
+                    " How much probability the model put on the move that was played, scored as cross-entropy and averaged over every move in the batch. One point per evaluation. Train and validation sit on top of each other for the whole run. With 876 million unique tokens and only 1.76 passes over them, the model never sees a position often enough to memorize it."
                 </figcaption>
             </figure>
 
@@ -106,10 +122,24 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <text class="tick" x="557.8" y="140" text-anchor="middle">"1.2B"</text>
                     <text class="tick" x="704" y="140" text-anchor="middle">"1.55B"</text>
                     <polyline class="series-val" points=TOP1_PTS></polyline>
+                    <ChartHover spec=HoverSpec {
+                        view_w: 720.0,
+                        left: 42.0,
+                        right: 704.0,
+                        top: 4.0,
+                        bottom: 122.0,
+                        x_axis: Axis { svg_a: 42.0, data_a: 0.0, svg_b: 704.0, data_b: 1.54595277648 },
+                        y_axis: Axis { svg_a: 112.0, data_a: 0.164291281328, svg_b: 17.2, data_b: 0.561790447171 },
+                        x_fmt: Fmt::Billions,
+                        y_fmt: Fmt::Percent,
+                        series: vec![
+                            HoverSeries::new("", "hover-dot-val", TOP1_PTS),
+                        ],
+                    } />
                 </svg>
                 <figcaption>
                     <strong>"Move accuracy."</strong>
-                    " How often the model's single best legal move is the one the human actually played, on held-out games. A perfect score is not the goal. Strong players disagree with each other all the time, so much of the remaining gap is a real difference of opinion."
+                    " How often the move the model scores highest is the one the human actually played, counted over every move in the held-out games. A perfect score is not the goal. Strong players disagree with each other all the time, so much of the remaining gap is a real difference of opinion."
                 </figcaption>
             </figure>
 
@@ -129,10 +159,24 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <text class="tick" x="557.8" y="140" text-anchor="middle">"1.2B"</text>
                     <text class="tick" x="704" y="140" text-anchor="middle">"1.55B"</text>
                     <polyline class="series-train" points=LR_PTS></polyline>
+                    <ChartHover spec=HoverSpec {
+                        view_w: 720.0,
+                        left: 42.0,
+                        right: 704.0,
+                        top: 4.0,
+                        bottom: 122.0,
+                        x_axis: Axis { svg_a: 42.0, data_a: 0.0, svg_b: 704.0, data_b: 1.54595277648 },
+                        y_axis: Axis { svg_a: 122.0, data_a: 0.0, svg_b: 17.2, data_b: 0.0003 },
+                        x_fmt: Fmt::Billions,
+                        y_fmt: Fmt::Rate,
+                        series: vec![
+                            HoverSeries::new("", "hover-dot-train", LR_PTS),
+                        ],
+                    } />
                 </svg>
                 <figcaption>
                     <strong>"Learning rate."</strong>
-                    " The size of each weight update. It rises over the first 2% of the run, then follows a cosine decay defined over the full 1.55-billion-token horizon, so late updates only make small adjustments. Changing that horizon would change the schedule, and with it the model."
+                    " The size of each weight update. It ramps up over the first 2% of the run to 3e-4, then follows a cosine decay defined over the full 1.55-billion-token horizon, so late updates only make small adjustments. Changing that horizon would change the schedule, and with it the model."
                 </figcaption>
             </figure>
         </div>

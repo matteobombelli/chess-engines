@@ -538,13 +538,17 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"One small network, two answers."</strong>
-                    " The board becomes 22 planes of 8 by 8 numbers. Twelve of them hold the pieces
-                    and the rest carry rule state such as castling rights, en passant, and
-                    repetitions. A 64-channel trunk of six residual blocks reads those planes. The
-                    policy head then scores every one of the 4,672 moves the action space can
-                    express, and the value head predicts whether the side to move wins, draws, or
-                    loses. The network is given no move history and no opening book, and it never
-                    proposes a move on its own."
+                    " The board becomes 22 planes of 8 by 8 numbers. Twelve hold the pieces, six for
+                    its own and six for yours, and the remaining ten carry the rule state a picture
+                    of the board cannot show: castling rights, the en passant square, how often this
+                    position has already occurred, the halfmove clock, and which colour is to move.
+                    When AlphaMini plays Black the whole board is flipped, so the side to move always
+                    faces up the board and the network only has to learn chess from one direction. A
+                    64-channel trunk of six residual blocks reads those planes. The policy head then
+                    scores every one of the 4,672 moves the action space can express, and the value
+                    head gives the odds of a win, a draw, and a loss, which search reads as the win
+                    chance minus the loss chance. The network is given no move history and no opening
+                    book, and it never proposes a move on its own."
                 </figcaption>
             </figure>
 
@@ -614,9 +618,13 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                     <strong>"The search around it."</strong>
                     " One simulation walks down the tree to a position the search has not seen, lists
                     the legal moves there, asks the network how the game looks and which moves
-                    deserve attention, then carries that answer back up the path it came down. Every
-                    pass makes the counts a little better informed, and the move with the most visits
-                    at the end is the one played. Rust owns legality throughout, so the network only
+                    deserve attention, then carries that answer back up the path it came down. Each
+                    step down weighs what the tree has already scored against what the network
+                    expected, so a move the policy head liked gets looked at early and then has to
+                    keep earning the attention. Every pass makes the counts a little better informed,
+                    and the move with the most visits at the end is the one played. Visits are a
+                    steadier signal than the raw score, because a move only collects them by
+                    surviving look after look. Rust owns legality throughout, so the network only
                     ever ranks moves the rules already allow."
                 </figcaption>
             </figure>
@@ -743,10 +751,14 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                     <strong>"A language model over moves."</strong>
                     " Every move played becomes a single token, after one token that marks the start
                     of the game. Twelve transformer layers read the whole sequence in one forward
-                    pass and return a score for each of the 4,736 tokens in the vocabulary. That
-                    vocabulary is AlphaMini's action space reused, so both models name moves the same
-                    way. Only the most recent 256 tokens fit, and a game longer than that loses its
-                    own opening from view."
+                    pass and return a score for each of the 4,736 tokens in the vocabulary. Attention
+                    is what turns that flat list into a game: inside every layer, each move looks
+                    back at all the moves before it, so by the top the last token carries the pawn
+                    structure, the opening, and the threat you just made. Nothing caches
+                    between moves, so the whole game is pushed through the graph again every time it
+                    is MiniGPT's turn. That vocabulary is AlphaMini's action space reused, so both
+                    models name moves the same way. Only the most recent 256 tokens fit, and a game
+                    longer than that loses its own opening from view."
                 </figcaption>
             </figure>
 
@@ -766,12 +778,14 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"The rules get the last word."</strong>
-                    " After 1. e4 e5 2. Nf3 there are 29 legal replies. Rust works them out and drops
-                    every other token before anything is chosen, so an illegal move cannot reach the
-                    board however highly the model scored it. The reply is then sampled from what
-                    survives at temperature 0.5, which keeps some variety in the openings without
-                    letting weak moves through often. The bars show the shape of a ranking and are
-                    drawn by hand, not measured."
+                    " The model has no board, so nothing stops it scoring a move that cannot be
+                    played. After 1. e4 e5 2. Nf3 there are 29 legal replies. Rust works them out and
+                    drops every other token before anything is chosen, so an illegal move cannot
+                    reach the board however highly the model scored it. The reply is then sampled
+                    from what survives at temperature 0.5, which keeps some variety in the openings
+                    without letting weak moves through often. The draw is seeded from the position,
+                    so MiniGPT answers the same position the same way every time. The bars show the
+                    shape of a ranking and are drawn by hand, not measured."
                 </figcaption>
             </figure>
         </div>

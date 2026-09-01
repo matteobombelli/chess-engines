@@ -703,6 +703,26 @@ h2 {
 .chart .dot-train { fill: var(--chart-train); stroke: var(--paper); stroke-width: 2; }
 .chart .dot-val { fill: var(--chart-val); stroke: var(--paper); stroke-width: 2; }
 
+.chart .hover-capture {
+    fill: transparent;
+    pointer-events: all;
+}
+
+.chart .hover-line { stroke: var(--line-strong); stroke-width: 1; }
+.chart .hover-dot-train { fill: var(--chart-train); stroke: var(--paper); stroke-width: 2; }
+.chart .hover-dot-val { fill: var(--chart-val); stroke: var(--paper); stroke-width: 2; }
+
+.chart .hover-readout {
+    fill: var(--ink-soft);
+    font-size: 11px;
+    font-family: var(--font-sans);
+    font-weight: 600;
+    paint-order: stroke;
+    stroke: var(--paper);
+    stroke-width: 3.5;
+    stroke-linejoin: round;
+}
+
 .chart .end-label {
     fill: var(--ink-soft);
     font-size: 12px;

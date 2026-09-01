@@ -1,4 +1,201 @@
+use leptos::ev::PointerEvent;
 use leptos::prelude::*;
+use leptos::svg;
+
+/// How one number is written in a hover readout.
+#[derive(Clone, Copy, PartialEq)]
+pub enum Fmt {
+    Hours,
+    Billions,
+    Loss,
+    Percent,
+    Rate,
+}
+
+fn format_value(fmt: Fmt, value: f64) -> String {
+    match fmt {
+        Fmt::Hours => format!("{value:.1} h"),
+        Fmt::Billions => format!("{:.2}B tokens", value),
+        Fmt::Loss => format!("{value:.2}"),
+        Fmt::Percent => format!("{:.1}%", value * 100.0),
+        Fmt::Rate => format_rate(value),
+    }
+}
+
+fn format_rate(value: f64) -> String {
+    if value <= 0.0 {
+        return "0".to_string();
+    }
+    let exponent = value.log10().floor();
+    let mantissa = format!("{:.1}", value / 10f64.powf(exponent));
+    let mantissa = mantissa.strip_suffix(".0").unwrap_or(&mantissa);
+    format!("{mantissa}e{}", exponent as i32)
+}
+
+/// A chart axis, given as two (svg coordinate, data value) anchors read off the
+/// tick markup. Every axis on these charts is linear, so two anchors define it.
+#[derive(Clone, Copy)]
+pub struct Axis {
+    pub svg_a: f64,
+    pub data_a: f64,
+    pub svg_b: f64,
+    pub data_b: f64,
+}
+
+impl Axis {
+    fn value_at(&self, coordinate: f64) -> f64 {
+        self.data_a
+            + (coordinate - self.svg_a) * (self.data_b - self.data_a) / (self.svg_b - self.svg_a)
+    }
+}
+
+#[derive(Clone)]
+pub struct HoverSeries {
+    label: &'static str,
+    class: &'static str,
+    points: Vec<(f64, f64)>,
+}
+
+impl HoverSeries {
+    /// `points` is the same string the `<polyline>` renders, so the hover layer
+    /// and the drawn curve can never drift apart.
+    pub fn new(label: &'static str, class: &'static str, points: &str) -> Self {
+        Self {
+            label,
+            class,
+            points: parse_points(points),
+        }
+    }
+}
+
+fn parse_points(raw: &str) -> Vec<(f64, f64)> {
+    raw.split_whitespace()
+        .filter_map(|pair| {
+            let (x, y) = pair.split_once(',')?;
+            Some((x.parse().ok()?, y.parse().ok()?))
+        })
+        .collect()
+}
+
+#[derive(Clone)]
+pub struct HoverSpec {
+    pub view_w: f64,
+    pub left: f64,
+    pub right: f64,
+    pub top: f64,
+    pub bottom: f64,
+    pub x_axis: Axis,
+    pub y_axis: Axis,
+    pub x_fmt: Fmt,
+    pub y_fmt: Fmt,
+    pub series: Vec<HoverSeries>,
+}
+
+/// Pointer readout for a chart. It snaps to the nearest sampled x, draws a
+/// crosshair and a dot on every series, and prints the values at that sample.
+/// Render it last inside the `<svg>`: its capture rect has to sit on top.
+#[component]
+pub fn ChartHover(spec: HoverSpec) -> impl IntoView {
+    let capture: NodeRef<svg::Rect> = NodeRef::new();
+    let active = RwSignal::new(None::<usize>);
+    let spec = StoredValue::new(spec);
+
+    let on_move = move |event: PointerEvent| {
+        let Some(element) = capture.get_untracked() else {
+            return;
+        };
+        let bounds = element.get_bounding_client_rect();
+        if bounds.width() <= 0.0 {
+            return;
+        }
+        let index = spec.with_value(|spec| {
+            let fraction = (f64::from(event.client_x()) - bounds.left()) / bounds.width();
+            let coordinate = spec.left + fraction * (spec.right - spec.left);
+            spec.series
+                .first()?
+                .points
+                .iter()
+                .enumerate()
+                .min_by(|(_, a), (_, b)| {
+                    (a.0 - coordinate).abs().total_cmp(&(b.0 - coordinate).abs())
+                })
+                .map(|(index, _)| index)
+        });
+        if active.get_untracked() != index {
+            active.set(index);
+        }
+    };
+
+    let (left, top) = spec.with_value(|spec| (spec.left, spec.top));
+    let (width, height) = spec.with_value(|spec| (spec.right - spec.left, spec.bottom - spec.top));
+
+    view! {
+        <g class="chart-hover" aria-hidden="true">
+            {move || {
+                let index = active.get()?;
+                spec.with_value(|spec| {
+                    let anchor = spec.series.first()?.points.get(index)?.0;
+                    let mut fields = vec![format_value(spec.x_fmt, spec.x_axis.value_at(anchor))];
+                    let dots = spec
+                        .series
+                        .iter()
+                        .filter_map(|series| {
+                            let (_, y) = *series.points.get(index)?;
+                            let value = format_value(spec.y_fmt, spec.y_axis.value_at(y));
+                            fields.push(match series.label {
+                                "" => value,
+                                label => format!("{label} {value}"),
+                            });
+                            Some(view! {
+                                <circle
+                                    class=format!("hover-dot {}", series.class)
+                                    cx=anchor.to_string()
+                                    cy=y.to_string()
+                                    r="3.5"
+                                ></circle>
+                            })
+                        })
+                        .collect::<Vec<_>>();
+                    let readout = fields.join(" · ");
+                    // Rough advance width for 11px system sans, enough to decide
+                    // whether the readout still fits to the right of the crosshair.
+                    let text_width = readout.chars().count() as f64 * 5.6;
+                    let flip = anchor + 10.0 + text_width > spec.view_w - 4.0;
+                    let text_x = if flip { anchor - 10.0 } else { anchor + 10.0 };
+                    let text_anchor = if flip { "end" } else { "start" };
+                    Some(view! {
+                        <line
+                            class="hover-line"
+                            x1=anchor.to_string()
+                            x2=anchor.to_string()
+                            y1=spec.top.to_string()
+                            y2=spec.bottom.to_string()
+                        ></line>
+                        {dots}
+                        <text
+                            class="hover-readout"
+                            x=text_x.to_string()
+                            y=(spec.top + 10.0).to_string()
+                            text-anchor=text_anchor
+                        >
+                            {readout}
+                        </text>
+                    })
+                })
+            }}
+            <rect
+                node_ref=capture
+                class="hover-capture"
+                x=left.to_string()
+                y=top.to_string()
+                width=width.to_string()
+                height=height.to_string()
+                on:pointermove=on_move
+                on:pointerleave=move |_| active.set(None)
+            ></rect>
+        </g>
+    }
+}
 
 const TOTAL_TRAIN_PTS: &str = "43.6,22.6 46.4,162.8 48.9,168.6 51.3,172.8 54.1,182.9 56.9,188.1 59.6,194.2 62.7,198.7 65.7,202.8 68.9,206.8 72.1,207.2 75.1,207.4 78.3,207.9 81.5,209.1 84.6,210.1 87.7,210.4 91.0,211.1 94.3,211.2 97.5,212.0 100.8,211.0 105.0,212.7 109.3,212.7 113.7,213.2 117.5,212.5 120.6,213.5 125.3,210.2 129.7,207.9 132.7,214.6 135.7,215.9 138.9,214.3 142.2,213.7 145.3,213.9 148.3,213.3 151.3,212.4 154.4,213.4 157.4,214.0 160.3,215.5 163.3,214.5 166.4,213.3 169.3,212.7 172.3,212.8 175.4,213.2 178.6,213.6 181.7,214.1 184.8,214.1 187.8,215.5 190.9,214.9 193.8,214.8 196.8,214.7 199.7,215.4 202.7,214.7 205.5,214.0 208.4,215.6 211.2,215.5 214.2,215.7 217.1,216.1 219.9,216.6 222.9,217.7 225.9,218.2 228.8,219.0 231.8,218.2 234.7,218.8 237.7,217.9 240.6,216.7 243.5,216.5 246.4,216.5 249.2,216.2 252.1,216.3 255.1,217.2 257.9,217.3 260.7,217.9 263.7,218.2 266.7,218.1 269.7,218.4 272.7,219.1 275.6,219.0 278.5,218.9 281.3,217.6 284.2,218.3 287.1,217.6 290.0,217.9 292.9,217.7 295.7,217.5 298.4,217.3 301.0,217.3 303.8,218.6 306.7,219.4 309.5,219.2 312.4,218.2 315.3,218.2 318.1,218.7 320.9,218.5 323.7,218.2 326.6,218.2 329.3,218.2 332.3,218.2 335.1,218.6 337.9,218.9 340.7,219.2 343.5,219.6 346.3,219.8 349.2,220.1 352.0,220.0 354.7,220.0 357.4,219.4 360.1,220.2 363.0,220.1 365.7,219.7 368.4,220.1 371.0,219.2 373.6,219.0 376.2,217.7 378.8,218.4 381.6,218.1 384.4,218.8 387.4,219.9 390.2,219.4 392.9,220.1 395.5,219.9 398.2,219.2 400.9,219.8 403.6,219.5 406.3,219.7 409.0,220.3 411.6,220.8 414.4,221.1 417.0,220.6 419.7,220.5 422.4,221.3 425.0,220.7 427.8,220.5 430.6,221.1 433.2,221.5 435.8,220.7 438.6,220.2 441.3,219.8 444.0,219.6 446.7,220.7 449.4,220.9 452.0,220.4 454.6,220.8 457.2,220.3 460.0,220.3 462.9,220.4 465.7,221.3 468.4,220.7 471.0,220.6 473.7,220.6 476.2,219.9 479.0,220.9 481.8,219.2 484.6,219.1 487.3,218.7 490.1,219.3 492.8,219.9 495.4,219.7 498.0,220.0 500.7,220.0 503.4,220.7 506.2,221.5 509.1,220.6 511.9,220.5 514.6,220.2 517.2,220.0 519.9,220.5 522.5,221.1 525.1,219.6 527.6,220.3 530.2,219.8 532.7,220.3 535.2,220.8 537.8,220.9 540.3,221.1 543.0,221.0 545.7,220.6 548.2,220.9 550.7,220.8 553.2,221.0 555.7,220.6 558.3,220.8 560.9,221.6 563.5,221.8 566.1,221.6 568.6,221.2 571.1,221.0 573.6,221.3 576.2,222.5 578.8,222.3 581.3,222.0 583.9,221.1 586.5,220.5 589.9,220.8 593.4,220.8 596.2,221.2 598.8,221.5 601.5,221.5";
 
@@ -25,7 +222,7 @@ pub fn TrainingProgress() -> impl IntoView {
                         "The deployed network came out of 391 self-play cycles across three chained runs. Each cycle plays a batch of games against itself, then updates the network on the positions those games produced."
                     </p>
                     <p>
-                        "Loss measures how far the network's predictions are from what the search chose and how the games actually ended. Lower is better."
+                        "Every training position carries two targets: the move distribution the search settled on, and the result of the game the position came from. The network is scored by cross-entropy against both, and the two scores are added with equal weight to give the total loss. Lower is better."
                     </p>
                 </div>
             </div>
@@ -90,10 +287,25 @@ pub fn TrainingProgress() -> impl IntoView {
                     <circle class="dot-train" cx="602" cy="221.5" r="4"></circle>
                     <text class="end-label" x="612" y="211.8">"validation 3.07"</text>
                     <text class="end-label" x="612" y="225.5">"train 2.86"</text>
+                    <ChartHover spec=HoverSpec {
+                        view_w: 720.0,
+                        left: 42.0,
+                        right: 602.0,
+                        top: 4.0,
+                        bottom: 232.0,
+                        x_axis: Axis { svg_a: 42.0, data_a: 0.0, svg_b: 602.0, data_b: 72.0 },
+                        y_axis: Axis { svg_a: 212.6, data_a: 3.0, svg_b: 18.5, data_b: 6.0 },
+                        x_fmt: Fmt::Hours,
+                        y_fmt: Fmt::Loss,
+                        series: vec![
+                            HoverSeries::new("train", "hover-dot-train", TOTAL_TRAIN_PTS),
+                            HoverSeries::new("validation", "hover-dot-val", TOTAL_VAL_PTS),
+                        ],
+                    } />
                 </svg>
                 <figcaption>
                     <strong>"Total loss."</strong>
-                    " Move and result loss combined, one point per cycle. Most of the improvement comes in the first five hours. Progress after that is slow, partly because each cycle trains on stronger games than the last."
+                    " The move loss and the result loss added together, one point per cycle. Train is the average over that cycle's weight updates, and validation is the same sum on games from the same batch that the optimizer never trains on. Most of the improvement comes in the first five hours. Progress after that is slow, partly because each cycle trains on stronger games than the last, so the target keeps moving away."
                 </figcaption>
             </figure>
 
@@ -113,10 +325,25 @@ pub fn TrainingProgress() -> impl IntoView {
                         <text class="tick" x="336" y="212" text-anchor="middle">"72h"</text>
                         <polyline class="series-val" points=POLICY_VAL_PTS></polyline>
                         <polyline class="series-train" points=POLICY_TRAIN_PTS></polyline>
+                        <ChartHover spec=HoverSpec {
+                            view_w: 350.0,
+                            left: 38.0,
+                            right: 336.0,
+                            top: 4.0,
+                            bottom: 194.0,
+                            x_axis: Axis { svg_a: 38.0, data_a: 0.0, svg_b: 336.0, data_b: 72.0 },
+                            y_axis: Axis { svg_a: 145.5, data_a: 3.0, svg_b: 24.1, data_b: 5.0 },
+                            x_fmt: Fmt::Hours,
+                            y_fmt: Fmt::Loss,
+                            series: vec![
+                                HoverSeries::new("train", "hover-dot-train", POLICY_TRAIN_PTS),
+                                HoverSeries::new("validation", "hover-dot-val", POLICY_VAL_PTS),
+                            ],
+                        } />
                     </svg>
                     <figcaption>
                         <strong>"Move prediction."</strong>
-                        " How well the network predicts which moves the search will favor. Train and validation stay close together, so the network predicts moves about as well on positions it has never trained on."
+                        " Cross-entropy between the network's move distribution and the share of search visits each move received. It asks whether one pass of the network can guess where 128 simulations of search would have spent their time. Train and validation stay close together, so the network predicts moves about as well on positions it has never trained on."
                     </figcaption>
                 </figure>
                 <figure class="chart">
@@ -134,10 +361,25 @@ pub fn TrainingProgress() -> impl IntoView {
                         <text class="tick" x="336" y="212" text-anchor="middle">"72h"</text>
                         <polyline class="series-val" points=WDL_VAL_PTS></polyline>
                         <polyline class="series-train" points=WDL_TRAIN_PTS></polyline>
+                        <ChartHover spec=HoverSpec {
+                            view_w: 350.0,
+                            left: 38.0,
+                            right: 336.0,
+                            top: 4.0,
+                            bottom: 194.0,
+                            x_axis: Axis { svg_a: 38.0, data_a: 0.0, svg_b: 336.0, data_b: 72.0 },
+                            y_axis: Axis { svg_a: 157.6, data_a: 0.6, svg_b: 12.0, data_b: 1.4 },
+                            x_fmt: Fmt::Hours,
+                            y_fmt: Fmt::Loss,
+                            series: vec![
+                                HoverSeries::new("train", "hover-dot-train", WDL_TRAIN_PTS),
+                                HoverSeries::new("validation", "hover-dot-val", WDL_VAL_PTS),
+                            ],
+                        } />
                     </svg>
                     <figcaption>
                         <strong>"Result prediction."</strong>
-                        " How well the network predicts whether a game ends in a win, a draw, or a loss. This is the network's weakest head. The gap between the two curves is wide, so it predicts results much less accurately on held-out games than on its own training batch."
+                        " Cross-entropy between the network's win, draw and loss probabilities and how the game actually ended, seen from the side to move. This is the network's weakest head. Validation uses the 5% of each cycle's games that the optimizer never trains on, which is a small sample, so that curve jumps around a lot."
                     </figcaption>
                 </figure>
             </div>
@@ -158,10 +400,22 @@ pub fn TrainingProgress() -> impl IntoView {
                     <text class="tick" x="593.7" y="140" text-anchor="middle">"60h"</text>
                     <text class="tick" x="704" y="140" text-anchor="middle">"72h"</text>
                     <polyline class="series-train" points=LR_PTS></polyline>
+                    <ChartHover spec=HoverSpec {
+                        view_w: 720.0,
+                        left: 42.0,
+                        right: 704.0,
+                        top: 4.0,
+                        bottom: 122.0,
+                        x_axis: Axis { svg_a: 42.0, data_a: 0.0, svg_b: 704.0, data_b: 72.0 },
+                        y_axis: Axis { svg_a: 122.0, data_a: 0.0, svg_b: 17.2, data_b: 1e-3 },
+                        x_fmt: Fmt::Hours,
+                        y_fmt: Fmt::Rate,
+                        series: vec![HoverSeries::new("", "hover-dot-train", LR_PTS)],
+                    } />
                 </svg>
                 <figcaption>
                     <strong>"Learning rate."</strong>
-                    " The size of each weight update. It increases to its maximum over the first hour, then follows a slow cosine decay so that late updates only make small adjustments. The two dips near eleven hours are run restarts repeating the warmup."
+                    " The size of each weight update. It ramps up over the first 2% of the step budget, then follows a cosine curve from 1e-3 down to 1e-4, so late updates only make small adjustments. The two dips are the run restarts, each of which repeats its own warmup."
                 </figcaption>
             </figure>
         </div>

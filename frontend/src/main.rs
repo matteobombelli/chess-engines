@@ -425,7 +425,6 @@ fn App() -> impl IntoView {
                         <a class="about-link" href="#about-model">
                             "About "
                             {move || selected_model.get().name()}
-                            <span aria-hidden="true">" ↓"</span>
                         </a>
                         <p class="player-side">
                             "You're playing "
@@ -475,7 +474,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"Random"</h2>
                             </div>
                             <p class="about-intro">
-                                "Random knows the rules of chess and nothing else. It picks one of the legal moves with equal odds. I wrote it first, as the floor the other four engines are measured against."
+                                "Random knows the rules of chess and nothing else. It asks for the legal moves and picks one with equal odds. Nothing in it can tell a good move from a bad one. I wrote it first, as the floor the other four engines are measured against."
                             </p>
                         </div>
 
@@ -497,7 +496,7 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Random went winless in 220 full rating games against Stockfish, Depth-3, and MiniGPT. Its only half points were seven stalemates MiniGPT stumbled into from winning positions. Every measurement is consistent with a rating below 400."
+                                    "Random went winless in 220 full games against Stockfish, Depth-3, and MiniGPT. Its only half points were seven stalemates MiniGPT stumbled into from winning positions. Every measurement is consistent with a rating below 400 on the approximate Chess.com scale used for the other four engines."
                                 </p>
                             </article>
                         </div>
@@ -511,7 +510,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"Depth-3 Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "Depth-3 Minimax looks three moves ahead and plays the line with the best score. The depth is fixed, so its reply time barely changes from one move to the next. This is the first engine here that plans at all."
+                                "Depth-3 Minimax looks three moves ahead and plays the line with the best score. It assumes you answer with your strongest reply at every step, scores the positions it lands in with seven hand-written chess rules, and carries those scores back up the tree. The depth is fixed, so its reply time barely changes from one move to the next. This is the first engine here that plans at all."
                             </p>
                         </div>
 
@@ -521,19 +520,25 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "The search assumes both sides play their strongest move. If the third move leads to captures or leaves a king in check, it follows those replies further before scoring the position."
+                                    "One function handles both sides. It scores a position for whoever is to move, then negates the score coming back up, so maximizing at every level is the same as assuming you always take your best reply. Alpha-beta pruning drops a branch as soon as one of your replies is good enough that the bot would never send the game that way. The skipped work cannot change the move it picks, so the pruning is free depth."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Quiescence"</h3>
+                                <p>
+                                    "Stopping the count in the middle of a trade would let the bot record a queen it just took and never see the recapture. So at the third move it keeps going, playing out captures and promotions until nothing tactical is left. When a king is in check it searches every legal move, because every one of them is forced."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Evaluation"</h3>
                                 <p>
-                                    "The score weighs material, piece placement, pawn structure, open files, and king safety. It gives a small bonus to the side to move. Checkmate is decisive and draws are even."
+                                    "The leaf score is in hundredths of a pawn. Material runs 100 for a pawn, 320 for a knight, 335 for a bishop, 500 for a rook, and 900 for a queen. On top of that: a placement term for central squares and advanced pawns, a king that wants to hide in the middlegame and walk forward in the ending, penalties for doubled and isolated pawns, bonuses for connected and passed pawns, 30 for the bishop pair, 10 for a rook on a file with no friendly pawn and 12 more if the file is fully open, 8 for each pawn shielding the king, and 10 for having the move. Checkmate scores 30,000 minus how deep the search had to go to reach it, so a mate found sooner outranks the same mate found later. Every draw scores zero."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Rated by full games against Stockfish 17.1 held at fixed strength levels. Over 80 games it fit a rating of 1698, with a 95% confidence interval of 1627 to 1766. The scale is Stockfish's human-anchored Elo, which is close to a Chess.com rating. Engines cannot play rated games on Chess.com, so every rating here is an estimate on that scale."
+                                    "Eighty full games against Stockfish 17.1 at fixed strength levels fit a rating of 1698, with a 95% interval of 1627 to 1766. That scale is Stockfish's human-anchored Elo, close to a Chess.com rating, and engines cannot play rated games on Chess.com, so every number here is an estimate on it."
                                 </p>
                             </article>
                         </div>
@@ -547,7 +552,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"9-second Minimax"</h2>
                             </div>
                             <p class="about-intro">
-                                "This engine gets nine seconds per move. It starts with a shallow search and keeps going deeper until the time is gone. It uses the same code and the same evaluation as Depth-3. The only difference is what stops the search."
+                                "This engine gets nine seconds per move. It searches to depth 1, starts over at depth 2, and keeps restarting one level deeper until the time is gone. It runs the same code and the same evaluation as Depth-3. The only difference is what stops the search: the depth ceiling is set to 64, so in practice the clock decides."
                             </p>
                         </div>
 
@@ -557,19 +562,25 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "It saves the best move after every depth it finishes, so it always has an answer ready when the clock runs out. Move ordering and alpha-beta pruning skip lines that cannot change its choice, which is what buys the extra depth."
+                                    "Every depth that finishes leaves a best move behind, so there is always an answer ready when the clock stops. Reading the clock costs time of its own, so the deadline is checked once every 1,024 positions. Whatever the depth in progress had worked out is thrown away, because it has only looked at some of the moves and would rank them unfairly."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"Move ordering"</h3>
+                                <p>
+                                    "Restarting from depth 1 sounds wasteful, and it pays for itself. The best move from the last depth is tried first at the next one, then captures ranked by what they win against what they risk, then promotions, then castling. Alpha-beta prunes hardest when the strongest move comes first, so the cheap shallow searches are what buy the deep one."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Evaluation"</h3>
                                 <p>
-                                    "The score weighs material, piece placement, pawn structure, open files, and king safety. It gives a small bonus to the side to move. Checkmate is decisive and draws are even."
+                                    "Identical to Depth-3: material, piece placement, pawn structure, rook files, king safety, and 10 hundredths of a pawn for having the move. Checkmate scores 30,000 minus how deep the search had to go to reach it. Every draw scores zero."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Rated by full games played through the live site, so the number reflects the server it really runs on. Over 60 games against Stockfish 17.1 at fixed strength levels it fit a rating of 2057, with a 95% confidence interval of 1961 to 2142 on the same approximate Chess.com scale as the other engines."
+                                    "Sixty full games against Stockfish 17.1 at fixed strength levels fit a rating of 2057, with a 95% interval of 1961 to 2142. The games ran through the live site, so the number reflects the server this engine really runs on. Same approximate Chess.com scale as the other engines."
                                 </p>
                             </article>
                         </div>
@@ -583,7 +594,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"AlphaMini"</h2>
                             </div>
                             <p class="about-intro">
-                                "AlphaMini learns from self-play alone. It has never seen a human game. A small convolutional network guesses which moves are worth looking at and how the game will end, and Monte Carlo tree search checks those guesses against the legal replies. I trained it for 72 hours on one RTX 3070."
+                                "AlphaMini learns from self-play alone. It has never seen a human game. The board reaches it as 22 stacked grids of numbers, and a small convolutional network turns those into two answers: a score for every move it could play, and its odds of winning, drawing, and losing. Monte Carlo tree search spends nine seconds testing those answers against real replies. I trained it for 72 hours on one RTX 3070."
                             </p>
                         </div>
 
@@ -591,21 +602,33 @@ fn App() -> impl IntoView {
 
                         <div class="about-details">
                             <article>
+                                <h3>"What it sees"</h3>
+                                <p>
+                                    "The position becomes 22 planes of 8 by 8 numbers. The first six mark where its own pawns, knights, bishops, rooks, queens, and king stand, and the next six do the same for yours. Two say whether this exact position has already happened once or twice, which is how it knows a repetition is coming. Four hold castling rights and one marks the en passant square. One says which colour is to move, one carries the halfmove clock as the count divided by 100, so it can feel the fifty-move rule approaching, and the last is all ones, a constant the convolutions use to find the edge of the board. When AlphaMini plays Black the board is flipped so the side to move always looks up the board, and no move history is in there at all."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"The network"</h3>
+                                <p>
+                                    "A 64-channel stem reads the planes and six 64-channel residual blocks refine them. Each block ends with squeeze and excitation, which weighs the whole board at once and turns channels up or down, so a threat on one wing can quiet a plan on the other. Two heads read the result. The policy head returns 4,672 numbers, one for every move the action space can name, which is 73 ways a piece can travel from each of 64 starting squares. The value head returns three, the chances of a win, a draw, and a loss. Search collapses those into one number by subtracting the loss chance from the win chance."
+                                </p>
+                            </article>
+                            <article>
                                 <h3>"Search"</h3>
                                 <p>
-                                    "Rust generates every legal move and searches the tree for up to nine seconds. The network only scores positions and ranks the moves it is given. It never produces a move of its own."
+                                    "The network alone is a hunch. Search is what checks it. One simulation walks down the tree picking the move with the best mix of what the tree has already scored and what the policy head expected, using an exploration constant of 1.5 to weigh the second against the first. At a position it has not seen, Rust lists the legal moves and the network scores them, and the value comes back up the path, updating every move along it. AlphaMini runs 10,000 of those or nine seconds, whichever ends first, eight positions to a batch on the GPU. The move it visited most often is the move it plays, which is a sturdier signal than the one it scored highest, because a move only collects visits by surviving repeated looks."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Training"</h3>
                                 <p>
-                                    "The deployed network trained for 72 active hours across three chained runs of self-play. Every cycle is seeded, and its checkpoint is recorded with the exact code and data behind it, so an interrupted run resumes where it stopped and any cycle can be checked later."
+                                    "One cycle plays 1,024 games against itself at 128 simulations a move, with random noise mixed into the root priors so it keeps trying openings it has already dismissed, then trains the network on the visit counts and the results those games produced. The next cycle plays with the network the last one left behind. That loop ran across three chained runs for 72.09 active hours. Every cycle is seeded and its checkpoint is recorded with the exact code and data behind it, so an interrupted run resumes where it stopped and any cycle can be checked later."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Rated by full games played through the live site, so the number reflects the production server. Over 160 games against Stockfish 17.1 at fixed strength levels it fit a rating of 2289, with a 95% confidence interval of 2229 to 2353. The older single-move estimate was 1970. Full games moved it up because a searching engine reliably converts the small advantages its judgment finds."
+                                    "160 full games against Stockfish 17.1 at fixed strength levels fit a rating of 2289, with a 95% interval of 2229 to 2353. The games ran through the live site, so the number reflects the production server. An older estimate that judged single moves put it at 1970; playing whole games moved it up, because a searching engine converts the small advantages its judgment finds. Same approximate Chess.com scale as the other engines."
                                 </p>
                             </article>
                         </div>
@@ -621,7 +644,7 @@ fn App() -> impl IntoView {
                                 <h2 id="about-model-title">"MiniGPT"</h2>
                             </div>
                             <p class="about-intro">
-                                "MiniGPT has 40.3 million parameters and does no search at all. I trained it on 11.2 million Lichess games where both players were rated at least 2000. It reads the moves played so far and answers with the move it expects to come next."
+                                "MiniGPT has 40.3 million parameters and does no search at all. It is the same kind of model that predicts the next word in a sentence, pointed at chess: every move is one token, and the model reads the tokens played so far and answers with the move it expects to come next. It has never been shown a board. All it knows is which moves tend to follow which. I trained it on 11.2 million Lichess games where both players were rated at least 2000."
                             </p>
                         </div>
 
@@ -631,19 +654,25 @@ fn App() -> impl IntoView {
                             <article>
                                 <h3>"Prediction"</h3>
                                 <p>
-                                    "Every game is a sequence of move tokens. A decoder-only transformer reads the sequence and scores every possible next move in one forward pass. A reply takes milliseconds."
+                                    "The game so far becomes a start token followed by one token per move, drawn from a vocabulary of 4,736 entries. Twelve transformer layers read that sequence, each carrying 512 numbers per token through 8 attention heads. Attention is the part that matters here: it lets every move in the sequence look back at all the moves before it, so the token for the last move arrives at the top carrying the shape of the whole game. Reading off that final token gives one score for every entry in the vocabulary, in a single forward pass that takes about nine milliseconds on CPU. Only the last 256 tokens fit, and a longer game loses its own opening from view."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rules"</h3>
                                 <p>
-                                    "Rust generates the legal moves and masks out everything else before the model's scores are read. The model only ranks moves the rules already allow."
+                                    "The model is free to score a move that would leave its king in check, or one the pieces cannot even make. So the Rust rules engine generates the legal moves first and throws away the score of every token that is not one of them. What survives is turned into probabilities at temperature 0.5, which widens the gap between strong and weak moves so the weak ones rarely come through, and the reply is drawn from those, which keeps some variety in the openings. The sampler is seeded from the position itself, so the same position always draws the same answer."
+                                </p>
+                            </article>
+                            <article>
+                                <h3>"What it learned from"</h3>
+                                <p>
+                                    "11.2 million Lichess blitz, rapid, and classical games, kept only when both players were rated at least 2000, the game started from the normal position, and it ran between 10 and 300 half-moves. A single unreadable move throws out the whole game. The model saw those games about 1.8 times over 77,000 optimizer steps. There is no rating token and no result token in the input, so it has one playing strength and no dial to turn."
                                 </p>
                             </article>
                             <article>
                                 <h3>"Rating"</h3>
                                 <p>
-                                    "Rated by full games against Stockfish 17.1 at fixed strength levels: 1395, with a 95% confidence interval of 1322 to 1455 over 160 games. Single-move tests once scored it near 1930, and the gap is the finding. Its moves look strong one at a time, but with no search it walks into tactics across a whole game."
+                                    "160 full games against Stockfish 17.1 at fixed strength levels fit a rating of 1395, with a 95% interval of 1322 to 1455. Single-move tests once scored it near 1930, and the gap is the finding: its moves look strong one at a time, but with no search it walks into tactics across a whole game. Same approximate Chess.com scale as the other engines."
                                 </p>
                             </article>
                         </div>
