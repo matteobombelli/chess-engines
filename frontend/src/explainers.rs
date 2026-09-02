@@ -101,7 +101,7 @@ pub fn RandomHowItWorks() -> impl IntoView {
                 <svg
                     viewBox="0 0 720 260"
                     role="img"
-                    aria-label="Random replays the game, asks the shared Rust rules engine for every legal move, and then picks one of the twenty legal opening moves with equal odds."
+                    aria-label="Random replays the game, asks the shared Rust rules engine for every legal move, and then picks one of the 20 legal opening moves with equal odds."
                 >
                     <defs>
                         <marker
@@ -153,10 +153,10 @@ pub fn RandomHowItWorks() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"One move, drawn at random."</strong>
-                    " The browser sends the moves played so far. The bot replays them, asks the rules
-                    engine for every move that is legal in the position it reaches, and picks one.
-                    The opening position has 20 legal moves, so each one has a 1 in 20 chance.
-                    Nothing in the bot can tell a good move from a bad one, so it will hang its
+                    " The browser sends the moves played so far. Random replays them, asks the shared
+                    rules engine for every move that is legal in the position it reaches, and picks
+                    one. The opening position has 20 legal moves, so each one has a 1 in 20 chance.
+                    Nothing in Random can tell a good move from a bad one, so it will hang its
                     queen as readily as it will take yours."
                 </figcaption>
             </figure>
@@ -199,6 +199,8 @@ fn triangle_down(cx: f64, cy: f64) -> String {
     )
 }
 
+/// The caption's "about 2,000 positions" is `find_best_move` at depth 3 from
+/// `1. e4 e5 2. Nf3`, which reports 2,124 nodes.
 #[component]
 pub fn MinimaxHowItWorks() -> impl IntoView {
     let leaves = (0..9)
@@ -282,15 +284,15 @@ pub fn MinimaxHowItWorks() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Three moves ahead."</strong>
-                    " The labels are written from the bot's side of the board. It tries each of its
+                    " The labels are written from the engine's side of the board. It tries each of its
                     own moves, then each of your replies, then each of its answers, and scores the
                     position it lands in. Reading back up, it assumes you take the reply it likes
                     least and it takes the answer it likes most. That makes the right-hand branch
                     worth +0.9, and that is the branch it plays. The greyed branch was never scored.
                     Its first answer there was already worth +0.5, more than the +0.1 you can hold
-                    the bot to on the branch beside it, so you would never send the game that way and
+                    the engine to on the branch beside it, so you would never send the game that way and
                     alpha-beta pruning stopped looking. The tree drawn here branches two ways at each
-                    level. After 1. e4 e5 2. Nf3 the real position has 29 legal moves and the depth-3
+                    level. The real position after 1. e4 e5 2. Nf3 is much wider, and the depth-3
                     search visits about 2,000 positions before it answers."
                 </figcaption>
             </figure>
@@ -339,7 +341,7 @@ pub fn TimedMinimaxHowItWorks() -> impl IntoView {
                 <svg
                     viewBox="0 0 720 300"
                     role="img"
-                    aria-label="The 9-second Minimax searches one depth after another inside a nine second budget, saving a best move after every depth it finishes and discarding the depth that is still running when the time runs out."
+                    aria-label="The 9-second Minimax searches one depth after another inside a nine-second budget, saving a best move after every depth it finishes and discarding the depth that is still running when the time runs out."
                 >
                     <line class="edge" x1={end_4} y1="96" x2={end_4} y2="62"></line>
                     <text class="tick" x="68" y="58">
@@ -403,7 +405,7 @@ pub fn TimedMinimaxHowItWorks() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Nine seconds, one depth at a time."</strong>
-                    " The bot searches to depth 1, then starts over at depth 2, and so on until the
+                    " The engine searches to depth 1, then starts over at depth 2, and so on until the
                     clock stops it. Every depth it finishes leaves a best move behind, so it always
                     has an answer ready when the nine seconds end. Whatever the last search had
                     worked out is thrown away, because a half-searched depth has only looked at some
@@ -541,7 +543,8 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                     " The board becomes 22 planes of 8 by 8 numbers. Twelve hold the pieces, six for
                     its own and six for yours, and the remaining ten carry the rule state a picture
                     of the board cannot show: castling rights, the en passant square, how often this
-                    position has already occurred, the halfmove clock, and which colour is to move.
+                    position has already occurred, the halfmove clock, which colour is to move, and
+                    one plane of ones that lets the convolutions find the edge of the board.
                     When AlphaMini plays Black the whole board is flipped, so the side to move always
                     faces up the board and the network only has to learn chess from one direction. A
                     64-channel trunk of six residual blocks reads those planes. The policy head then
@@ -556,7 +559,7 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                 <svg
                     viewBox="0 0 720 300"
                     role="img"
-                    aria-label="Monte Carlo tree search repeats a loop of select, expand, evaluate with the network, and back up, until it has run ten thousand simulations or spent nine seconds, and then plays the move it visited most often."
+                    aria-label="Monte Carlo tree search repeats a loop of select, expand, evaluate with the network, and back up, until it has run 10,000 simulations or spent nine seconds, and then plays the move it visited most often."
                 >
                     <defs>
                         <marker
@@ -695,7 +698,7 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                 <svg
                     viewBox="0 0 720 260"
                     role="img"
-                    aria-label="MiniGPT turns each move played into one token and runs the sequence through twelve transformer layers, which return one score for every token in its 4,736-entry vocabulary."
+                    aria-label="MiniGPT turns each move played into one token and runs the sequence through 12 transformer layers, which return one score for every token in its 4,736-entry vocabulary."
                 >
                     <defs>
                         <marker
@@ -753,12 +756,12 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                     of the game. Twelve transformer layers read the whole sequence in one forward
                     pass and return a score for each of the 4,736 tokens in the vocabulary. Attention
                     is what turns that flat list into a game: inside every layer, each move looks
-                    back at all the moves before it, so by the top the last token carries the pawn
-                    structure, the opening, and the threat you just made. Nothing caches
-                    between moves, so the whole game is pushed through the graph again every time it
-                    is MiniGPT's turn. That vocabulary is AlphaMini's action space reused, so both
-                    models name moves the same way. Only the most recent 256 tokens fit, and a game
-                    longer than that loses its own opening from view."
+                    back at all the moves before it, so by the top the last token carries the threat
+                    you just made. Nothing caches between moves, so the whole game is pushed through
+                    the model again every time it is MiniGPT's turn. That vocabulary is AlphaMini's
+                    action space reused, so both models name moves the same way. The window holds 256
+                    tokens, the start token plus the newest 255 moves, so a longer game loses its own
+                    opening from view."
                 </figcaption>
             </figure>
 

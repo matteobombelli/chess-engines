@@ -98,22 +98,9 @@ impl SearchPosition {
         self.board.piece_at(square)
     }
 
-    /// All squares in a1-to-h8 order.
-    pub fn squares(&self) -> &[Option<Piece>; 64] {
-        &self.board.squares
-    }
-
     /// Occupancy bitboard for one colored piece kind (a1 is the low bit).
     pub fn piece_bitboard(&self, color: Color, kind: PieceKind) -> u64 {
         self.bitboards[piece_index(Piece { color, kind })]
-    }
-
-    /// Occupancy bitboard for all pieces.
-    pub fn occupancy(&self) -> u64 {
-        self.bitboards
-            .iter()
-            .copied()
-            .fold(0, |all, pieces| all | pieces)
     }
 
     /// The player whose turn it is.
@@ -160,17 +147,12 @@ impl SearchPosition {
     }
 
     /// Number of occurrences of `key` on the current game path.
-    pub fn repetition_count_for(&self, key: u128) -> u16 {
+    fn repetition_count_for(&self, key: u128) -> u16 {
         self.repetitions.get(&key).copied().unwrap_or(0)
     }
 
-    /// Number of positions on the game path, including the current position.
-    pub fn history_len(&self) -> usize {
-        self.key_history.len()
-    }
-
     /// Whether the side to move is in check.
-    pub fn is_in_check(&self) -> bool {
+    fn is_in_check(&self) -> bool {
         self.board.is_in_check()
     }
 
@@ -387,12 +369,6 @@ impl SearchPosition {
     }
 }
 
-impl From<&Board> for SearchPosition {
-    fn from(board: &Board) -> Self {
-        Self::from_board(board)
-    }
-}
-
 fn remember_square(board: &Board, undo: &mut BoardUndo, square: Square) {
     if undo.changed[..undo.changed_len]
         .iter()
@@ -526,12 +502,10 @@ mod tests {
         assert_eq!(search.en_passant_target(), None);
         assert_eq!(search.halfmove_clock(), 0);
         assert_eq!(search.fullmove_number(), 1);
-        assert_eq!(search.squares(), &board.squares);
         assert_eq!(
             search.piece_bitboard(Color::White, PieceKind::Pawn),
             0x0000_0000_0000_ff00
         );
-        assert_eq!(search.occupancy(), 0xffff_0000_0000_ffff);
     }
 
     #[test]

@@ -4,7 +4,7 @@
 //       --shards data/minigpt/shards/shards.json --params 40330240 \
 //       > frontend/src/minigpt_training.rs
 
-use crate::training::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};
+use crate::chart::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};
 use leptos::prelude::*;
 
 const TRAIN_LOSS_PTS: &str = "45.6,32.5 49.3,108.1 52.9,141.3 56.5,157.5 60.2,166.9 63.8,172.4 67.5,176.2 71.1,178.8 74.7,180.8 78.4,182.6 82,184.4 85.6,185.6 89.3,186.6 92.9,187.5 96.5,188.6 100.2,189.4 103.8,190.1 107.5,190.9 111.1,191.2 114.7,191.9 118.4,192.3 122,192.9 125.6,193.5 129.3,193.9 132.9,194.2 136.5,194.5 140.2,195 143.8,195.3 147.5,195.7 151.1,195.9 154.7,196.3 158.4,196.6 162,196.6 165.6,197.1 169.3,197.3 172.9,197.5 176.5,197.8 180.2,197.8 183.8,198.1 187.5,198.2 191.1,198.6 194.7,198.7 198.4,198.9 202,199 205.6,199.2 209.3,199.2 212.9,199.7 216.5,199.5 220.2,199.9 223.8,199.9 227.5,199.9 231.1,200.3 234.7,200.4 238.4,200.6 242,200.7 245.6,200.8 249.3,200.7 252.9,200.9 256.5,201.1 260.2,201.2 263.8,201.2 267.5,201.5 271.1,201.5 274.7,201.6 278.4,201.8 282,201.9 285.6,202.1 289.3,202 292.9,202.2 296.5,202.1 300.2,202.3 303.8,202.4 307.5,202.4 311.1,202.6 314.7,202.6 318.4,202.7 322,202.7 325.6,203.1 329.3,203.1 332.9,203.2 336.5,203.2 340.2,203.1 343.8,203.4 347.5,203.4 351.1,203.5 354.7,203.5 358.4,203.8 362,204 365.6,204.1 369.3,204.2 372.9,204.1 376.5,204.3 380.2,204.2 383.8,204.5 387.5,204.4 391.1,204.3 394.7,204.6 398.4,204.6 402,204.7 405.6,204.7 409.3,204.6 412.9,204.8 416.5,204.8 420.2,205 423.8,205 427.5,205 431.1,205.2 434.7,205.2 438.4,205.3 442,205.2 445.6,205.3 449.3,205.4 452.9,205.5 456.5,205.4 460.2,205.5 463.8,205.6 467.5,205.6 471.1,205.6 474.7,205.8 478.4,205.8 482,205.9 485.6,205.9 489.3,206 492.9,206.1 496.5,206 500.2,206 503.8,206.1 507.5,206.1 511.1,206.2 514.7,206.1 518.4,206.3 522,206.3 525.6,206.3 529.3,206.4 532.9,206.3 536.5,206.3 540.2,206.4 543.8,206.5 547.5,206.5 551.1,206.5 554.7,206.5 558.4,206.6 562,206.6 565.6,206.6 569.3,206.6 572.9,206.6 576.5,206.7 580.2,206.7 583.8,206.6 587.5,206.6 591.1,206.7 594.7,206.8 598.4,206.8 602,206.7";
@@ -36,7 +36,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <dt>"Training tokens"</dt>
                     <dd class="stat-value">"1.55B"</dd>
                     <dd class="stat-note">
-                        "The corpus has 876 million unique training tokens, so the run is about 1.76 passes over it."
+                        "The corpus has 876 million unique training tokens, so the run is about 1.8 passes over it."
                     </dd>
                 </div>
                 <div>
@@ -50,7 +50,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                     <dt>"Validation loss"</dt>
                     <dd class="stat-value">"4.72 to 1.42"</dd>
                     <dd class="stat-note">
-                        "Loss on held-out games the optimizer never sees. The lowest value is the last one, so the curve was still falling at the end."
+                        "Loss on held-out games the optimizer never sees. The first value is the evaluation at step 500, not the untrained model. The lowest value is the last one, so the curve was still falling at the end."
                     </dd>
                 </div>
                 <div>
@@ -105,7 +105,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Loss."</strong>
-                    " How much probability the model put on the move that was played, scored as cross-entropy and averaged over every move in the batch. One point per evaluation. Train and validation sit on top of each other for the whole run. With 876 million unique tokens and only 1.76 passes over them, the model never sees a position often enough to memorize it."
+                    " How much probability the model put on the move that was played, scored as cross-entropy and averaged over every move in the batch. One point per evaluation. Train and validation sit on top of each other for almost the whole run. With 876 million unique tokens and only 1.8 passes over them, the model never sees a position often enough to memorize it."
                 </figcaption>
             </figure>
 

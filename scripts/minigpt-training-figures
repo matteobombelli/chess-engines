@@ -447,7 +447,7 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
     out.append(f"//       --shards {shards_path} --params {parameters} \\")
     out.append("//       > frontend/src/minigpt_training.rs")
     out.append("")
-    out.append("use crate::training::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};")
+    out.append("use crate::chart::{Axis, ChartHover, Fmt, HoverSeries, HoverSpec};")
     out.append("use leptos::prelude::*;")
     out.append("")
     for name, value in consts:
@@ -491,7 +491,7 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
             "Training tokens",
             horizon_tokens,
             f"The corpus has {corpus_tokens / 1e6:.0f} million unique training tokens, so "
-            f"the run is about {epochs:.2f} passes over it.",
+            f"the run is about {epochs:.1f} passes over it.",
         ),
         (
             "Parameters",
@@ -502,7 +502,9 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
         (
             "Validation loss",
             f"{first['validation_loss']:.2f} to {last['validation_loss']:.2f}",
-            "Loss on held-out games the optimizer never sees. " + best_loss_note,
+            "Loss on held-out games the optimizer never sees. The first value is the "
+            f"evaluation at step {int(first['step']):,}, not the untrained model. "
+            + best_loss_note,
         ),
         (
             "Move accuracy",
@@ -579,8 +581,8 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
             " How much probability the model put on the move that was played, scored as"
             " cross-entropy and averaged over every move in the batch."
             + sampling_note
-            + " Train and validation sit on top of each other for the whole run. With"
-            f" {corpus_tokens / 1e6:.0f} million unique tokens and only {epochs:.2f} passes"
+            + " Train and validation sit on top of each other for almost the whole run. With"
+            f" {corpus_tokens / 1e6:.0f} million unique tokens and only {epochs:.1f} passes"
             " over them, the model never sees a position often enough to memorize it."
         )
     )

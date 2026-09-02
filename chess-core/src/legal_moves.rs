@@ -26,6 +26,10 @@ impl Board {
     /// Apply a move to the Board, recording it in `san_history` as SAN
     pub fn make_move(&mut self, mv: Move) {
         let legal_moves: Vec<Move> = self.get_legal_moves();
+        debug_assert!(
+            legal_moves.contains(&mv),
+            "make_move was given a move this position never generated: {mv:?}"
+        );
         self.make_move_with_legal_moves(mv, &legal_moves);
     }
 
@@ -333,7 +337,7 @@ impl Board {
     /// bare kings, a single bishop/knight, or bishops confined to one color.
     /// Positions with pawns, rooks, queens, or multiple knight colors remain
     /// playable because some legal continuation can still end in checkmate.
-    pub fn has_insufficient_material(&self) -> bool {
+    pub(crate) fn has_insufficient_material(&self) -> bool {
         let mut minor_count = 0;
         let mut knight_count = 0;
         let mut bishop_square_color = None;
@@ -375,7 +379,7 @@ impl Board {
     }
 
     /// Number of occurrences of the current repetition position, including now.
-    pub fn current_position_repetition_count(&self) -> usize {
+    fn current_position_repetition_count(&self) -> usize {
         let Some(current) = self.position_history.last() else {
             return 0;
         };
@@ -779,6 +783,14 @@ const QUEEN_DIRS: [(i8, i8); 8] = [
 mod tests {
     use super::*;
 
+    fn uci_moves(board: &Board) -> Vec<String> {
+        board
+            .get_legal_moves()
+            .into_iter()
+            .map(|mv| mv.to_uci())
+            .collect()
+    }
+
     /// Count the leaf nodes of the move tree to a given depth
     fn perft(board: &Board, depth: u32) -> u64 {
         if depth == 0 {
@@ -802,6 +814,33 @@ mod tests {
         assert_eq!(perft(&board, 1), 20);
         assert_eq!(perft(&board, 2), 400);
         assert_eq!(perft(&board, 3), 8902);
+    }
+
+    #[test]
+    fn named_position_move_counts() {
+        // The standard perft suite: castling, promotion, en passant, pins, and
+        // discovered checks that a start-position count never exercises.
+        for (fen, depth, nodes) in [
+            (
+                "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
+                3,
+                97862,
+            ),
+            ("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1", 4, 43238),
+            (
+                "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1",
+                3,
+                9467,
+            ),
+            (
+                "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8",
+                3,
+                62379,
+            ),
+        ] {
+            let board = Board::from_fen(fen).expect("perft FEN should parse");
+            assert_eq!(perft(&board, depth), nodes, "{fen} at depth {depth}");
+        }
     }
 
     #[test]
@@ -1007,12 +1046,12 @@ mod tests {
     #[test]
     fn stale_castling_rights_cannot_materialize_a_rook() {
         let no_rooks = Board::from_fen("4k3/8/8/8/8/8/8/4K3 w KQ - 0 1").unwrap();
-        let legal = no_rooks.legal_uci_moves();
+        let legal = uci_moves(&no_rooks);
         assert!(!legal.contains(&"e1g1".to_string()));
         assert!(!legal.contains(&"e1c1".to_string()));
 
         let enemy_rooks = Board::from_fen("4k3/8/8/8/8/8/8/r3K2r w KQ - 0 1").unwrap();
-        let legal = enemy_rooks.legal_uci_moves();
+        let legal = uci_moves(&enemy_rooks);
         assert!(!legal.contains(&"e1g1".to_string()));
         assert!(!legal.contains(&"e1c1".to_string()));
     }
@@ -1020,7 +1059,7 @@ mod tests {
     #[test]
     fn malformed_en_passant_target_cannot_capture_a_missing_pawn() {
         let missing_pawn = Board::from_fen("4k3/8/8/4P3/8/8/8/4K3 w - d6 0 1").unwrap();
-        assert!(!missing_pawn.legal_uci_moves().contains(&"e5d6".to_string()));
+        assert!(!uci_moves(&missing_pawn).contains(&"e5d6".to_string()));
 
         let occupied_target = Board::from_fen("4k3/8/3n4/3pP3/8/8/8/4K3 w - d6 0 1").unwrap();
         // This is a normal capture of the knight on d6. Applying it must not
@@ -1039,7 +1078,7 @@ mod tests {
         // generation also rejects a target on an impossible rank.
         let mut wrong_rank = Board::from_fen("4k3/8/8/8/8/3Pp3/8/4K3 w - - 0 1").unwrap();
         wrong_rank.en_passant = Some(Square::new(4, 3));
-        assert!(!wrong_rank.legal_uci_moves().contains(&"d3e4".to_string()));
+        assert!(!uci_moves(&wrong_rank).contains(&"d3e4".to_string()));
     }
 
     #[test]
@@ -1174,7 +1213,14 @@ mod tests {
                 let mut board_after = board.clone();
                 board_after.make_search_move(mv);
                 let undo = search.make_move(mv);
-                assert_eq!(search.squares(), &board_after.squares, "{name}: pieces");
+                for index in 0..64u8 {
+                    let square = Square(index);
+                    assert_eq!(
+                        search.piece_at(square),
+                        board_after.piece_at(square),
+                        "{name}: piece on {index}"
+                    );
+                }
                 assert_eq!(
                     search.position_key(),
                     crate::SearchPosition::from_board(&board_after).position_key(),

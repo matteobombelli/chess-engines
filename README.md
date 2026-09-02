@@ -1,4 +1,4 @@
-# ChessBots
+# Chess Engines
 
 This repository is a learning project: build several chess engines yourself, understand why they work, train the learned ones from scratch, and put each engine behind the same playable web interface.
 
@@ -139,7 +139,7 @@ and local-only commits. It never creates a merge commit or rewrites production
 history. For a build of the already-checked-out commit without fetching, use
 `./scripts/deploy.sh` directly.
 
-The active Caddy site must include the three namespaced API handlers from
+The active Caddy site must include the four namespaced API handlers from
 `deploy/caddy/chessengines.caddy` before its Chess Engines static-file handler.
 After changing Caddy, validate and reload it once:
 
@@ -152,16 +152,17 @@ The deploy script checks those routes before building or changing production,
 so an outdated proxy configuration cannot leave a partially deployed release.
 Set `CHESSENGINES_CADDY_CONFIG` if the active Caddyfile lives elsewhere.
 
-The script runs the workspace tests, builds all three bot APIs and the frontend
+The script runs the workspace tests, builds all four bot APIs and the frontend
 in release mode, validates AlphaMini's ONNX model and manifest, publishes the
-frontend to `/srv/chessengines`, restarts the three user services, and
+frontend to `/srv/chessengines`, restarts the four user services, and
 smoke-tests all routes.
 
 Production service and reverse-proxy templates live under `deploy/`. Random,
-Minimax, and AlphaMini listen on ports 3002, 3004, and 3006. AlphaMini serves
-FP32 ONNX on CPU with one bounded search at a time and the frozen 9-second,
-10,000-simulation, batch-8 release budget. Its immutable `model.onnx` and
-`manifest.json` live outside Git under `artifacts/alphamini/current`.
+Minimax, AlphaMini, and MiniGPT listen on ports 3002, 3004, 3006, and 3008.
+AlphaMini serves FP32 ONNX on CPU with one bounded search at a time and the
+frozen 9-second, 10,000-simulation, batch-8 release budget. Its immutable
+`model.onnx` and `manifest.json` live outside Git under
+`artifacts/alphamini/current`.
 
 ## Working rule
 

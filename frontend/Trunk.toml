@@ -6,14 +6,16 @@
 # terminal:
 #
 #   cargo run -p random   # 127.0.0.1:3000
+#
+# `public_url` matches the deployed prefix so the piece images, which the app
+# addresses by absolute path, resolve under `trunk serve` as well.
+
+[build]
+public_url = "/projects/chessengines/"
 
 [[proxy]]
 rewrite = "/projects/chessengines/api/random/"
 backend = "http://127.0.0.1:3000/"
-
-[[proxy]]
-rewrite = "/projects/chessengines/api/markov/"
-backend = "http://127.0.0.1:3001/"
 
 [[proxy]]
 rewrite = "/projects/chessengines/api/minimax/"
@@ -22,3 +24,7 @@ backend = "http://127.0.0.1:3002/"
 [[proxy]]
 rewrite = "/projects/chessengines/api/alphamini/"
 backend = "http://127.0.0.1:3006/"
+
+[[proxy]]
+rewrite = "/projects/chessengines/api/minigpt/"
+backend = "http://127.0.0.1:3008/"

@@ -66,17 +66,6 @@ impl Board {
         Ok(mv)
     }
 
-    /// Every legal move in this position as canonical UCI.
-    ///
-    /// This is the candidate set the gateway sends to a model service. A model
-    /// may rank these strings; it may never introduce another one.
-    pub fn legal_uci_moves(&self) -> Vec<String> {
-        self.get_legal_moves()
-            .into_iter()
-            .map(|mv| mv.to_uci())
-            .collect()
-    }
-
     /// Replay a whole-game UCI sequence from the standard starting position.
     ///
     /// Used to rebuild and verify an untrusted move history: replay it, then
@@ -206,8 +195,9 @@ mod tests {
         let board = Board::from_fen("4k3/P7/8/8/8/8/8/4K3 w - - 0 1").expect("FEN should parse");
 
         let promotions: Vec<String> = board
-            .legal_uci_moves()
+            .get_legal_moves()
             .into_iter()
+            .map(|mv| mv.to_uci())
             .filter(|uci| uci.starts_with("a7a8"))
             .collect();
 
@@ -267,12 +257,15 @@ mod tests {
     }
 
     #[test]
-    fn legal_uci_moves_matches_the_legal_move_count() {
+    fn canonical_uci_is_unique_per_legal_move() {
         let board = Board::from_fen(START).expect("start FEN should parse");
-        let uci = board.legal_uci_moves();
+        let uci: Vec<String> = board
+            .get_legal_moves()
+            .into_iter()
+            .map(|mv| mv.to_uci())
+            .collect();
 
         assert_eq!(uci.len(), 20);
-        assert_eq!(uci.len(), board.get_legal_moves().len());
         // Canonical UCI is unique per legal move, which is what lets a score map
         // be keyed by it.
         let mut sorted = uci.clone();
@@ -315,7 +308,7 @@ mod tests {
             START,
             "r3k2r/pPpppppp/8/8/8/8/PPPPPPPP/R3K2R w KQkq - 0 1",
             "rnbqkbnr/ppp1pppp/8/3pP3/8/8/PPPP1PPP/RNBQKBNR w KQkq d6 0 3",
-            "8/2k5/8/8/8/8/5k2/6R1 b - - 0 1",
+            "8/2k5/8/8/8/8/5K2/6R1 b - - 0 1",
         ] {
             let board = Board::from_fen(fen).expect("FEN should parse");
             for mv in board.get_legal_moves() {

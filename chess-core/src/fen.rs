@@ -21,13 +21,39 @@ impl Board {
             let rank = 7 - row as u8;
             let mut file: u8 = 0;
             for ch in rank_str.chars() {
-                if let Some(digit) = ch.to_digit(10) {
-                    file += digit as u8;
-                } else {
-                    let piece = piece_from_char(ch)?;
-                    board.set_piece(Square::new(file, rank), Some(piece));
-                    file += 1
-                }
+                let width: u8 = match ch.to_digit(10) {
+                    Some(digit @ 1..=8) => digit as u8,
+                    Some(_) => return Err(format!("expected a skip of 1-8, got {ch}")),
+                    None => {
+                        let piece = piece_from_char(ch)?;
+                        // Guard the square index: a rank wider than the board
+                        // would otherwise write past the 64-square array.
+                        if file >= 8 {
+                            return Err(format!("rank {} is wider than 8 squares", rank + 1));
+                        }
+                        board.set_piece(Square::new(file, rank), Some(piece));
+                        1
+                    }
+                };
+                file += width;
+            }
+            if file != 8 {
+                return Err(format!(
+                    "expected 8 squares in rank {}, got {file}",
+                    rank + 1
+                ));
+            }
+        }
+
+        for color in [Color::White, Color::Black] {
+            let kings = board
+                .squares
+                .iter()
+                .flatten()
+                .filter(|piece| piece.kind == PieceKind::King && piece.color == color)
+                .count();
+            if kings != 1 {
+                return Err(format!("expected exactly 1 {color:?} king, got {kings}"));
             }
         }
 
@@ -271,6 +297,22 @@ mod tests {
         let board = Board::from_fen(start).expect("start FEN should parse");
 
         assert_eq!(board.to_fen(), start);
+    }
+
+    #[test]
+    fn rejects_malformed_piece_placement() {
+        // A rank wider than the board, too many ranks, a rank that stops short,
+        // and a digit run that would overflow the file counter.
+        assert!(Board::from_fen("rnbqkbnrr/8/8/8/8/8/8/8 w - - 0 1").is_err());
+        assert!(Board::from_fen("4k3/8/8/8/8/8/8/4K3/8 w - - 0 1").is_err());
+        assert!(Board::from_fen("4k3/8/8/8/8/8/8/3K3 w - - 0 1").is_err());
+        assert!(Board::from_fen("99999999/8/8/8/8/8/8/8 w - - 0 1").is_err());
+    }
+
+    #[test]
+    fn rejects_a_position_without_exactly_one_king_a_side() {
+        assert!(Board::from_fen("8/8/8/8/8/8/8/8 w - - 0 1").is_err());
+        assert!(Board::from_fen("4k3/8/8/8/8/8/8/3KK3 w - - 0 1").is_err());
     }
 
     #[test]
