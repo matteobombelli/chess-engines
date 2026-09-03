@@ -109,7 +109,7 @@ pub fn TrainingProgress() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Total loss."</strong>
-                    " The move loss and the result loss added together, one point per cycle. Train is the average over that cycle's weight updates, and validation is the same sum on games from the same batch that the optimizer never trains on. Most of the improvement comes in the first five hours. Progress after that is slow, partly because each cycle trains on stronger games than the last, so the target keeps moving away."
+                    " The move loss and the result loss added together, one point per cycle. Train is the average over that cycle's weight updates, and validation is the same sum on games from the same batch that the optimizer never trains on. Most of the improvement comes in the first five hours. Progress after that is slow, partly because each cycle trains on stronger games than the last, so the targets themselves keep changing."
                 </figcaption>
             </figure>
 

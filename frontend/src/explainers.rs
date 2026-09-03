@@ -156,8 +156,8 @@ pub fn RandomHowItWorks() -> impl IntoView {
                     " The browser sends the moves played so far. Random replays them, asks the shared
                     rules engine for every move that is legal in the position it reaches, and picks
                     one. The opening position has 20 legal moves, so each one has a 1 in 20 chance.
-                    Nothing in Random can tell a good move from a bad one, so it will hang its
-                    queen as readily as it will take yours."
+                    Nothing in Random scores moves, so it is as likely to hang its queen as to
+                    take yours."
                 </figcaption>
             </figure>
         </div>
@@ -290,7 +290,7 @@ pub fn MinimaxHowItWorks() -> impl IntoView {
                     least and it takes the answer it likes most. That makes the right-hand branch
                     worth +0.9, and that is the branch it plays. The greyed branch was never scored.
                     Its first answer there was already worth +0.5, more than the +0.1 you can hold
-                    the engine to on the branch beside it, so you would never send the game that way and
+                    the engine to on the branch beside it, so you would never choose that branch, and
                     alpha-beta pruning stopped looking. The tree drawn here branches two ways at each
                     level. The real position after 1. e4 e5 2. Nf3 is much wider, and the depth-3
                     search visits about 2,000 positions before it answers."
@@ -541,17 +541,18 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                 <figcaption>
                     <strong>"One small network, two answers."</strong>
                     " The board becomes 22 planes of 8 by 8 numbers. Twelve hold the pieces, six for
-                    its own and six for yours, and the remaining ten carry the rule state a picture
-                    of the board cannot show: castling rights, the en passant square, how often this
-                    position has already occurred, the halfmove clock, which colour is to move, and
-                    one plane of ones that lets the convolutions find the edge of the board.
+                    its own and six for yours, and the remaining ten carry state that the piece
+                    placement does not show. Those are castling rights, the en passant square, how
+                    often this position has already occurred, the halfmove clock, which colour is
+                    to move, and one plane of ones that lets the convolutions find the edge of the
+                    board.
                     When AlphaMini plays Black the whole board is flipped, so the side to move always
                     faces up the board and the network only has to learn chess from one direction. A
                     64-channel trunk of six residual blocks reads those planes. The policy head then
                     scores every one of the 4,672 moves the action space can express, and the value
                     head gives the odds of a win, a draw, and a loss, which search reads as the win
                     chance minus the loss chance. The network is given no move history and no opening
-                    book, and it never proposes a move on its own."
+                    book, and it only scores moves the rules engine has already listed."
                 </figcaption>
             </figure>
 
@@ -622,13 +623,13 @@ pub fn AlphaMiniHowItWorks() -> impl IntoView {
                     " One simulation walks down the tree to a position the search has not seen, lists
                     the legal moves there, asks the network how the game looks and which moves
                     deserve attention, then carries that answer back up the path it came down. Each
-                    step down weighs what the tree has already scored against what the network
-                    expected, so a move the policy head liked gets looked at early and then has to
-                    keep earning the attention. Every pass makes the counts a little better informed,
-                    and the move with the most visits at the end is the one played. Visits are a
-                    steadier signal than the raw score, because a move only collects them by
-                    surviving look after look. Rust owns legality throughout, so the network only
-                    ever ranks moves the rules already allow."
+                    step down weighs the value the tree has already measured against the policy
+                    head's prior, so a move the policy head rated highly is visited early and keeps
+                    being visited only while its measured value holds up. The move with the most
+                    visits at the end is the one played. Visit counts are a steadier signal than
+                    the value estimate, because a move only collects visits by scoring well as the
+                    tree grows. The Rust rules engine lists the legal moves at every node, so the
+                    network only ever ranks moves the rules allow."
                 </figcaption>
             </figure>
         </div>
@@ -754,10 +755,10 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                     <strong>"A language model over moves."</strong>
                     " Every move played becomes a single token, after one token that marks the start
                     of the game. Twelve transformer layers read the whole sequence in one forward
-                    pass and return a score for each of the 4,736 tokens in the vocabulary. Attention
-                    is what turns that flat list into a game: inside every layer, each move looks
-                    back at all the moves before it, so by the top the last token carries the threat
-                    you just made. Nothing caches between moves, so the whole game is pushed through
+                    pass and return a score for each of the 4,736 tokens in the vocabulary. Inside
+                    every layer, each token attends to all the tokens before it, so the output at
+                    the last token depends on the whole game, including the move you just played.
+                    Nothing caches between moves, so the whole game is pushed through
                     the model again every time it is MiniGPT's turn. That vocabulary is AlphaMini's
                     action space reused, so both models name moves the same way. The window holds 256
                     tokens, the start token plus the newest 255 moves, so a longer game loses its own
@@ -780,7 +781,7 @@ pub fn MiniGptHowItWorks() -> impl IntoView {
                     <line class="baseline" x1="24" y1={MINIGPT_BASELINE} x2="700" y2={MINIGPT_BASELINE}></line>
                 </svg>
                 <figcaption>
-                    <strong>"The rules get the last word."</strong>
+                    <strong>"Legal moves only."</strong>
                     " The model has no board, so nothing stops it scoring a move that cannot be
                     played. After 1. e4 e5 2. Nf3 there are 29 legal replies. Rust works them out and
                     drops every other token before anything is chosen, so an illegal move cannot

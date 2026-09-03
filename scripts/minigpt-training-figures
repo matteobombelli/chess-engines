@@ -617,9 +617,9 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
         "                    "
         + rust_string(
             " How often the move the model scores highest is the one the human actually"
-            " played, counted over every move in the held-out games. A perfect score is"
-            " not the goal. Strong players disagree with each other all the time, so much"
-            " of the remaining gap is a real difference of opinion."
+            " played, counted over every move in the held-out games. Strong players often"
+            " choose different moves in the same position, so 100% is not reachable and part"
+            " of the remaining gap is disagreement between players."
         )
     )
     out.append("                </figcaption>")
@@ -661,7 +661,7 @@ def build(metrics_path: Path, total_steps: int, shards_path: Path, parameters: i
             f" {format_rate(max(learning_rate.values))}, then follows a cosine decay"
             f" defined over the full {billions(trained_tokens)}-billion-token horizon, so"
             " late updates only make small adjustments. Changing that horizon would change"
-            " the schedule, and with it the model."
+            " the schedule and the trained weights."
         )
     )
     out.append("                </figcaption>")

@@ -139,7 +139,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Move accuracy."</strong>
-                    " How often the move the model scores highest is the one the human actually played, counted over every move in the held-out games. A perfect score is not the goal. Strong players disagree with each other all the time, so much of the remaining gap is a real difference of opinion."
+                    " How often the move the model scores highest is the one the human actually played, counted over every move in the held-out games. Strong players often choose different moves in the same position, so 100% is not reachable and part of the remaining gap is disagreement between players."
                 </figcaption>
             </figure>
 
@@ -176,7 +176,7 @@ pub fn MiniGptTrainingProgress() -> impl IntoView {
                 </svg>
                 <figcaption>
                     <strong>"Learning rate."</strong>
-                    " The size of each weight update. It ramps up over the first 2% of the run to 3e-4, then follows a cosine decay defined over the full 1.55-billion-token horizon, so late updates only make small adjustments. Changing that horizon would change the schedule, and with it the model."
+                    " The size of each weight update. It ramps up over the first 2% of the run to 3e-4, then follows a cosine decay defined over the full 1.55-billion-token horizon, so late updates only make small adjustments. Changing that horizon would change the schedule and the trained weights."
                 </figcaption>
             </figure>
         </div>
